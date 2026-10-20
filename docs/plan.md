@@ -59,6 +59,7 @@
 
 - `DEPLOY_ID` isn't set inside a deployed Netlify Server, so every instance counts as the newest. That's still safe, since the fence stops whichever lost the lease, but an old deploy's URL could take the lease back from production. The request's context has the deploy ID; the lease could take it from the first request.
 - How long the Gateway's credentials stay good after the request that brought them. If it's shorter than the gap between wake-ups, background calls need a key set on the site. Scheduled jobs are the first model calls made outside a request; reminders only push.
+- Sandboxes, where it stopped on 2026-10-20: a sandbox can be created (`dreamwalker-probe` exists), but commands don't reach it yet. Next: `POST /api/sandbox/probe` once they do, to see the image, then the `ExecutionEnv`.
 - Sandboxes: the SDK is `plinthwick` on npm, despite its description. Pi's own remote environment, `pi-env`, needs its daemon started as a local child process, which a Netlify Server shouldn't spawn, so dreamwalker's `ExecutionEnv` will be its own over the SDK's commands and files. What the sandbox image has (a shell, coreutils, python) decides how its file operations are built.
 - Commits are a dozen or so round trips on one connection. Fine in the same region as the database; worth measuring once deployed.
 
