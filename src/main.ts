@@ -13,6 +13,9 @@ const USAGE = `usage: dreamwalker COMMAND
   allow [AMOUNT]            let today go AMOUNT dollars past the daily limit, or another
                             day's limit
   wake                      wake the server, which resumes whatever was waiting
+  memory                    the notes dreamwalker keeps about you, which every prompt sees
+  remember "TEXT"           add a note
+  forget ID                 delete a note, such as n3
 
 DREAMWALKER_URL and DREAMWALKER_TOKEN come from the environment or .env.`;
 
@@ -52,6 +55,24 @@ async function main(argv: string[]): Promise<number> {
 			printBudget(await client.allow(amount));
 			return 0;
 		}
+		case "memory": {
+			const { notes, maxTotal } = await client.memory();
+			for (const n of notes) console.log(`n${n.id}  ${n.text}${n.by === "owner" ? "" : `  (${n.by})`}`);
+			console.log(`${notes.length === 0 ? "no notes yet; " : ""}${notes.reduce((sum, n) => sum + n.text.length, 0)} of ${maxTotal} characters`);
+			return 0;
+		}
+		case "remember": {
+			const text = rest.join(" ").trim();
+			if (text === "") throw new Error('remember needs the note: dreamwalker remember "..."');
+			const note = await client.remember(text);
+			console.log(`n${note.id}  ${note.text}`);
+			return 0;
+		}
+		case "forget":
+			if (rest[0] === undefined) throw new Error("forget needs a note id, such as n3");
+			await client.forget(rest[0]);
+			console.log(`forgot ${rest[0]}`);
+			return 0;
 		case "wake":
 			console.log((await client.wake()) ? "awake" : "not awake");
 			return 0;

@@ -49,6 +49,7 @@
 6. Staying awake: a scheduled function requests `/api/wake` every four minutes.
 7. The `dreamwalker` command: `ask`, `status`, `budget`, `allow` and `wake` over the API, with the URL and token from `.env`.
 8. Reminders, from gaidin, for one agent and the owner's phone: `remind`, `list_reminders` and `cancel_reminder`, a background task per reminder that survives restarts, five tries to push, and a record in the transcript. They reach the owner through ntfy (`NTFY_URL`, `NTFY_TOKEN`), or the server's log without it. Each message is stamped with the local time (`DREAMWALKER_TZ`) and the prompt names the owner (`DREAMWALKER_OWNER`). Not yet: gaidin's snooze buttons (the phone would carry the owner's token), speakers and agents, and the guard on cancelling, which comes with approvals.
+9. Memory, from gaidin, for one agent: notes in every prompt, kept with `remember`, `update_memory` and `forget`, 500 characters a note and 8,000 in all, and the owner's `GET /api/memory` and `POST /api/memory/add`, `update` and `forget`, with `dreamwalker memory`, `remember` and `forget`. Not yet: asking before a write after outside text, which comes with approvals.
 
 ## Open questions
 
@@ -60,4 +61,4 @@
 ## Next
 
 1. Sandboxes, once the site can use them: an `ExecutionEnv` over a Netlify Sandbox, checked with `registerEnvConformance`, and `CodingTools`.
-2. From gaidin, in order: memory, redaction and approvals, scheduled jobs, Slack.
+2. From gaidin, in order: redaction and approvals (with the memory guard), scheduled jobs, Slack.

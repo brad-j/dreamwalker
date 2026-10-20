@@ -6,7 +6,7 @@ A personal agent for one person on Pi Durable, built for Netlify Server: the pla
 
 - `pnpm install`, then `pnpm check` before every commit: `tsc`, oxlint with the anti-slop rules, and every test.
 - One test file while working: `node --no-warnings --test test/api.test.ts`.
-- `pnpm dreamwalker ask "..."` (also `status`, `budget`, `allow`, `wake`) talks to the server named by `DREAMWALKER_URL` with `DREAMWALKER_TOKEN`, both from `.env`.
+- `pnpm dreamwalker ask "..."` (also `status`, `budget`, `allow`, `wake`, `memory`, `remember`, `forget`) talks to the server named by `DREAMWALKER_URL` with `DREAMWALKER_TOKEN`, both from `.env`.
 - `DREAMWALKER_MODEL=faux pnpm dev` runs the server under `netlify dev` on a scripted model, with no key or network. It needs Node.js 24 and netlify-cli 27.10.0 or later.
 - Deploy by pushing to `main`; Netlify builds it. Not `netlify deploy`: from the CLI, new migrations are uploaded but not applied.
 - `netlify database migrations apply` (while `pnpm dev` runs) applies new migrations to the local database. Deploys apply them themselves.

@@ -27,6 +27,7 @@ pnpm dreamwalker ask "remind me what we talked about"
 pnpm dreamwalker status       # the instance, storage, budget and model credentials
 pnpm dreamwalker budget       # today's and this month's spend against the limits
 pnpm dreamwalker allow 5      # let today go $5 past the daily limit
+pnpm dreamwalker memory       # the notes it keeps about you; remember "..." and forget n3 change them
 ```
 
 On Netlify, Claude comes through the AI Gateway with no key of your own. Locally, set `ANTHROPIC_API_KEY` instead of `DREAMWALKER_MODEL=faux`. `DREAMWALKER_MODEL_ID` picks the model, `claude-haiku-5-5` by default.

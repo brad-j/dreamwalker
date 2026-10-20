@@ -2,7 +2,7 @@
 // Answers are parsed here, at the boundary; a refusal becomes an error carrying the server's own words.
 
 import { randomUUID } from "node:crypto";
-import { boolean, type Json, number, object, optional, parse, type Parser, string } from "./parse.ts";
+import { array, boolean, type Json, number, object, optional, parse, type Parser, string } from "./parse.ts";
 
 export type ClientSettings = { url: string; token: string | undefined };
 
@@ -25,6 +25,9 @@ export class ApiError extends Error {
 const Answer = object({ answer: string });
 const Failure = object({ error: string });
 const Woke = object({ awake: boolean });
+const NoteAnswer = object({ id: number, text: string, by: string });
+const NotesAnswer = object({ notes: array(NoteAnswer), maxNote: number, maxTotal: number });
+const Ok = object({ ok: boolean });
 const BudgetAnswer = object({ today: number, month: number, dailyLimit: number, monthlyLimit: number, stopped: boolean, reason: optional(string) });
 
 export function createClient(settings: ClientSettings, request: typeof fetch = fetch) {
@@ -55,6 +58,10 @@ export function createClient(settings: ClientSettings, request: typeof fetch = f
 		/** Allows today `amount` dollars more, or another day's limit. */
 		allow: (amount?: number) => call("/api/budget/allow", BudgetAnswer, { method: "POST", body: amount === undefined ? {} : { amount } }),
 		wake: async () => (await call("/api/wake", Woke)).awake,
+		/** The notes dreamwalker keeps, and their limits. */
+		memory: () => call("/api/memory", NotesAnswer),
+		remember: (text: string) => call("/api/memory/add", NoteAnswer, { method: "POST", body: { text } }),
+		forget: async (id: string) => (await call("/api/memory/forget", Ok, { method: "POST", body: { id } })).ok,
 	};
 }
 

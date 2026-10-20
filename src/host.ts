@@ -1,10 +1,11 @@
-// The Harness and the root conversation, over whichever storage it's given: Netlify Database on the platform, memory
-// in tests and for `DREAMWALKER_STORAGE=memory`. Every model request passes the spend guard first, and everything
+// The Harness and the root conversation, over whichever storage it's given: Netlify Database on the platform, Pi's
+// in-memory storage in tests and for `DREAMWALKER_STORAGE=memory`. Every model request passes the spend guard first, and everything
 // told to the owner unprompted (reminders, budget warnings) goes through notifications.ts.
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { AssistantEntry, createRegistry, defineExtension, type EntryRecord, Harness, section, type Storage } from "@earendil-works/pi-durable";
 import { type BudgetSettings, budgetSettingsFrom, createBudget } from "./budget.ts";
+import { createMemory } from "./memory.ts";
 import { type Chosen } from "./model.ts";
 import { type Adapters, createNotifications } from "./notifications.ts";
 import { createReminders } from "./reminders.ts";
@@ -59,6 +60,7 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 			],
 		}),
 	);
+	registry.install(createMemory(owner).extension);
 	registry.install(reminders.extension);
 	registry.install(budget.extension);
 	const harness = await Harness.open(

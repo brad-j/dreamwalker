@@ -7,10 +7,15 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { platformNames, type ReadEnv, type VariableNames } from "./environment.ts";
 import type { Instance } from "./instance.ts";
 import type { Credentials } from "./model.ts";
+import { addNote, forgetNote, MAX_NOTE, MAX_TOTAL, Memory, noteId, noteProblem, updateNote } from "./memory.ts";
 import { number, object, optional, parse, ParseError, type Parser, string } from "./parse.ts";
+import { context } from "./host.ts";
 
 const AskBody = object({ message: string, requestId: optional(string) });
 const AllowBody = object({ amount: optional(number) });
+const AddNoteBody = object({ text: string });
+const UpdateNoteBody = object({ id: noteId, text: string });
+const ForgetNoteBody = object({ id: noteId });
 
 export type ApiOptions = {
 	/** The owner's token; undefined refuses every guarded route unless `local`. */
@@ -84,6 +89,32 @@ export function createApi(instance: Instance, options: ApiOptions) {
 			const amount = body.amount ?? host.budget.limits.daily;
 			if (amount <= 0) return Response.json({ error: "amount should be more than 0" }, { status: 400 });
 			return Response.json(await host.budget.allowMore(amount));
+		}
+		if (url.pathname === "/api/memory" && request.method === "GET") {
+			const notes = (await host.harness.snapshot(Memory, context))?.notes ?? [];
+			return Response.json({ notes, maxNote: MAX_NOTE, maxTotal: MAX_TOTAL });
+		}
+		if (url.pathname === "/api/memory/add" && request.method === "POST") {
+			const body = await bodyOf(request, AddNoteBody);
+			if (body instanceof Response) return body;
+			const problem = noteProblem((await host.harness.snapshot(Memory, context))?.notes ?? [], body.text);
+			if (problem !== undefined) return Response.json({ error: problem }, { status: 400 });
+			return Response.json(await host.root.commit((tx) => addNote(tx, body.text, "owner"), context));
+		}
+		if (url.pathname === "/api/memory/update" && request.method === "POST") {
+			const body = await bodyOf(request, UpdateNoteBody);
+			if (body instanceof Response) return body;
+			const notes = (await host.harness.snapshot(Memory, context))?.notes ?? [];
+			if (!notes.some((n) => n.id === body.id)) return Response.json({ error: `No note n${body.id}.` }, { status: 404 });
+			const problem = noteProblem(notes, body.text, body.id);
+			if (problem !== undefined) return Response.json({ error: problem }, { status: 400 });
+			return Response.json(await host.root.commit((tx) => updateNote(tx, body.id, body.text, "owner"), context));
+		}
+		if (url.pathname === "/api/memory/forget" && request.method === "POST") {
+			const body = await bodyOf(request, ForgetNoteBody);
+			if (body instanceof Response) return body;
+			const removed = await host.root.commit((tx) => forgetNote(tx, body.id), context);
+			return removed === undefined ? Response.json({ error: `No note n${body.id}.` }, { status: 404 }) : Response.json({ ok: true });
 		}
 		if (url.pathname === "/api/ask" && request.method === "POST") {
 			const body = await bodyOf(request, AskBody);
