@@ -1,0 +1,3 @@
+# Everything is served by netlify/server/index.ts. Keep index.html out of public/: it would shadow the server's /.
+[build]
+  publish = "public"

@@ -1,0 +1,60 @@
+# Plan
+
+## Decisions
+
+- dreamwalker is a new project, not a fork of gaidin. gaidin assumes one always-on process, a SQLite file on its own disk, bubblewrap, a Unix socket and Tailscale; a Netlify Server sleeps after five minutes idle, loses its disk on every restart, and has none of the others. Seams for both in one codebase would cost more than they save, and gaidin on its VM stays the agent in daily use.
+- The core is the same: Pi Durable, pi-ai and chord, pinned at 1.3.0 and upgraded deliberately. gaidin's modules that don't depend on the VM are copied in one at a time, when a feature needs them, and adapted. There are no merges from upstream. `src/parse.ts` is the first.
+- It runs as one Netlify Server (`netlify/server/index.ts`), on the `/api/*` paths for now. Static files and the app come later.
+- Memory and the local disk are never storage. Everything that has to survive goes in Netlify Database or Netlify Blobs.
+- Pi Durable's own SQLite storage runs on Netlify Database through a Postgres version of its database facade (`src/storage/postgres.ts`), not a port of the storage: its SQL is portable enough to translate placeholders and `INSERT OR IGNORE`, so its storage code and its fixes stay Pi Durable's. Its tables are prefixed `pi_`. It passes Pi Durable's storage conformance suite.
+- The schema comes only from `netlify/database/migrations`, applied by the deploy, as Netlify Database expects. The facade refuses DDL, so a Pi Durable upgrade that changes the schema fails at start until its next version is added as a migration.
+- One writer at a time through a lease row (`src/storage/lease.ts`): a newer deploy takes it over at once, an older one only once it has run out (60 seconds), and every transaction renews it under the row's lock and fails if it was taken, so an instance that lost it can't commit. That instance's API answers 503; any other storage failure reopens the storage from the last commit.
+- Claude through Netlify's AI Gateway, no key of our own. Its credentials are in the environment only while a request is being handled, and reminders, jobs and resumed runs call the model outside one, so `src/model.ts` keeps the newest it has seen and every request refreshes them; `/api/wake` brings one every few minutes. An `ANTHROPIC_API_KEY` set on the site wins, since the Gateway never overrides it.
+- A spend guard, from gaidin, because the Customer Success team pays for the site's AI and database use: model requests stop at `DREAMWALKER_BUDGET_DAILY` ($5 by default) or `DREAMWALKER_BUDGET_MONTHLY` ($50 by default), counted from Pi Durable's costs in `DREAMWALKER_TZ`'s days (UTC by default). Database compute isn't counted. Until there's a way to reach the owner, its warnings go to the server's log and `/api/status`.
+- Production is public and previews keep the team's login: Netlify's login and password both use the `Authorization` header our token does, and pings and webhooks can't sign in.
+- The storage opens on the first request, not at startup: in a deployed Server, `NETLIFY_DB_URL` isn't in the environment while the module loads.
+- Every route but `/api/health` and `/api/wake` needs the owner's token (`DREAMWALKER_TOKEN`, a secret on the site); without one they're refused except under `netlify dev`.
+- Same conventions as gaidin: pnpm, `pnpm check` (tsc, oxlint with the anti-slop rules, tests on the faux model), packages at least 3 days old.
+
+## The platform, as dreamwalker relies on it
+
+- One instance per deploy, 1 GB of memory and 1 vCPU, Node.js 24.
+- It starts on the first request, sleeps after five minutes without one, and is replaced after eight hours regardless. `onShutdown` hooks share about 25 seconds.
+- A request can run 30 minutes (2 hours on Pro); response headers must start within 60 seconds. Work that outlives its request is registered with `getContext().waitUntil()`.
+- Netlify Sandboxes: named VMs with their own persistent disk, an egress allowlist, and secrets swapped in only on requests to named hosts.
+
+## How gaidin's assumptions map
+
+| gaidin | dreamwalker |
+|---|---|
+| `gaidin.sqlite` on the VM's disk | Pi Durable storage on Netlify Database, one writer at a time through a lease |
+| `history.sqlite`, an FTS5 index of the transcript | Rebuilt from the transcript, or Postgres full-text search |
+| One process, always on | Asleep after five minutes. Pi Durable resumes where it stopped; something outside requests `/api/wake` every few minutes so reminders and jobs fire on time |
+| bubblewrap, a sandbox directory per agent | A Netlify Sandbox per agent, behind Pi Durable's `ExecutionEnv` |
+| CLI over a Unix socket | The HTTP API, with the owner's token |
+| The app behind Tailscale | Netlify Identity or the owner's token; routes that ntfy and voice call check their own secret |
+| Slack over Socket Mode | Works while awake; the Events API later, which wakes the server itself |
+| Skills repo, connector vault, browser profiles on disk | Blobs or Database |
+| Workspaces and the homelab over SSH and Tailscale | Not for now |
+| Chromium and poppler on the VM | Not for now; later inside a Sandbox |
+
+## Done
+
+1. The skeleton: Pi Durable on memory storage inside a Netlify Server, the faux model or Claude, and `POST /api/ask`, running under `netlify dev`.
+2. Netlify Database storage: Pi Durable's SQLite storage on a Postgres facade, its schema as a migration, the lease, and reopening after a storage failure. Tests run Pi Durable's 24 storage conformance cases on an in-process Postgres (`@netlify/database-dev`); under `netlify dev` a conversation survives a restart.
+3. Claude through the AI Gateway with credentials kept between requests, the owner's token on every route but health and wake, `/api/wake`, and `/api/status` (the deploy, the storage, and where the model's credentials came from and how old they are, never the key).
+4. The spend guard: daily and monthly limits, 80% and stop warnings, `GET /api/budget` and `POST /api/budget/allow`, and the storage opening on the first request.
+5. Deployed: the site runs as a Netlify Server, and production runs the server on the faux model.
+
+## Open questions
+
+- Whether `DEPLOY_ID` is set inside a deployed Netlify Server (it's `0` under `netlify dev`). Without it every instance counts as the newest, which is still safe, since the fence stops the one that lost the lease, but an old deploy's URL could then take the lease back from production.
+- How long the Gateway's credentials stay good after the request that brought them. If it's shorter than the gap between wake-ups, background calls need a key set on the site.
+- Commits are a dozen or so round trips on one connection. Fine in the same region as the database; worth measuring once deployed.
+
+## Next
+
+1. Claude in production, once production is public: remove `DREAMWALKER_MODEL`, check the Gateway's credentials in `/api/status`, and set something pinging `/api/wake`.
+2. Sandboxes: an `ExecutionEnv` over a Netlify Sandbox, checked with `registerEnvConformance`, and `CodingTools`.
+3. A CLI that talks to the API with the owner's token.
+4. From gaidin, in order: reminders and ntfy, memory, redaction and approvals, scheduled jobs, Slack.

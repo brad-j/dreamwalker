@@ -1,0 +1,10 @@
+allowBuilds:
+  '@google/genai': false
+  esbuild: false
+  protobufjs: false
+# Package versions must be 3 days old before pnpm resolves them (pnpm's default is 1 day).
+minimumReleaseAge: 4320
+# Netlify's own packages for Netlify Server are taken as soon as they're released, since the platform moves with them.
+minimumReleaseAgeExclude:
+  - '@netlify/server'
+  - '@netlify/types'
