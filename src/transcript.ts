@@ -5,6 +5,7 @@
 import { AssistantEntry, type Conversation, type EntryRecord, ToolResultEntry, UserEntry } from "@earendil-works/pi-durable";
 import { context } from "./host.ts";
 import { ApprovalSettled } from "./approvals.ts";
+import { JobReported } from "./jobs.ts";
 import { ReminderFired } from "./reminders.ts";
 
 export type Line =
@@ -12,6 +13,7 @@ export type Line =
 	| { kind: "answer"; id: number; at: number; text: string }
 	| { kind: "tool"; id: number; at: number; name: string; args: string; result?: string; error: boolean }
 	| { kind: "reminder"; id: number; at: number; text: string; delivered: boolean }
+	| { kind: "job"; id: number; at: number; title: string; text: string; delivered: boolean; paused: boolean; runConversation: number }
 	| { kind: "approval"; id: number; at: number; tool: string; summary: string; status: string; decision?: string; by?: string; question: boolean; answer?: string };
 
 /** A message's text: the string, or its text parts joined. */
@@ -47,6 +49,9 @@ export function linesOf(entries: readonly EntryRecord[]): Line[] {
 		} else if (ApprovalSettled.is(entry) && entry.data !== undefined) {
 			const d = entry.data;
 			lines.push({ kind: "approval", id: entry.id, at: d.decidedAt ?? 0, tool: d.tool, summary: d.summary, status: d.status, decision: d.decision, by: d.by, question: d.kind === "question", answer: d.answer });
+		} else if (JobReported.is(entry) && entry.data !== undefined) {
+			const d = entry.data;
+			lines.push({ kind: "job", id: entry.id, at: d.at ?? 0, title: d.title, text: d.text, delivered: d.delivered, paused: d.paused === true, runConversation: d.conversationId });
 		} else if (ReminderFired.is(entry) && entry.data !== undefined) {
 			lines.push({ kind: "reminder", id: entry.id, at: entry.data.at, text: entry.data.text, delivered: entry.data.delivered });
 		}

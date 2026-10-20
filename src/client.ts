@@ -29,6 +29,8 @@ const NoteAnswer = object({ id: number, text: string, by: string });
 const NotesAnswer = object({ notes: array(NoteAnswer), maxNote: number, maxTotal: number });
 const Ok = object({ ok: boolean });
 const RequestAnswer = object({ id: string, tool: string, summary: string, kind: optional(literal("question")), choices: optional(array(string)), always: optional(object({ label: string })), createdAt: number, status: string });
+const JobAnswer = object({ taskId: number, title: string, instruction: string, mode: string, nextAt: optional(number), lastAt: optional(number), lastResult: optional(string), failures: optional(number), paused: optional(object({ at: number, reason: string })) });
+const JobsAnswer = object({ jobs: array(JobAnswer) });
 const Requests = object({ requests: array(RequestAnswer), fetchHosts: array(string) });
 const BudgetAnswer = object({ today: number, month: number, dailyLimit: number, monthlyLimit: number, stopped: boolean, reason: optional(string) });
 
@@ -68,6 +70,9 @@ export function createClient(settings: ClientSettings, request: typeof fetch = f
 		requests: () => call("/api/approvals", Requests),
 		decide: (id: string, decision: "once" | "always" | "deny") => call("/api/approvals/decide", RequestAnswer, { method: "POST", body: { id, decision } }),
 		answer: (id: string, text: string) => call("/api/approvals/answer", RequestAnswer, { method: "POST", body: { id, text } }),
+		/** Scheduled jobs, soonest first. */
+		jobs: () => call("/api/jobs", JobsAnswer),
+		job: (action: "cancel" | "pause" | "resume", id: number) => call(`/api/jobs/${action}`, JobAnswer, { method: "POST", body: { id } }),
 	};
 }
 

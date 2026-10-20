@@ -10,6 +10,7 @@ import type { Credentials } from "./model.ts";
 import { addNote, forgetNote, MAX_NOTE, MAX_TOTAL, Memory, noteId, noteProblem, updateNote } from "./memory.ts";
 import { literal, number, object, optional, parse, ParseError, type Parser, string } from "./parse.ts";
 import { context } from "./host.ts";
+import { Jobs, pauseJob, removeJob, resumeJob } from "./jobs.ts";
 import { Reminders, removeReminder } from "./reminders.ts";
 import { transcript } from "./transcript.ts";
 
@@ -22,6 +23,7 @@ const CancelReminderBody = object({ id: number });
 const DecideBody = object({ id: string, decision: literal("once", "always", "deny") });
 const AnswerBody = object({ id: string, text: string });
 const HostBody = object({ host: string });
+const JobBody = object({ id: number });
 
 export type ApiOptions = {
 	/** The owner's token; undefined refuses every guarded route unless `local`. */
@@ -134,6 +136,18 @@ export function createApi(instance: Instance, options: ApiOptions) {
 			if (body instanceof Response) return body;
 			const removed = await host.root.commit((tx) => removeReminder(tx, body.id), context);
 			return removed === undefined ? Response.json({ error: `No open reminder ${body.id}.` }, { status: 404 }) : Response.json({ ok: true });
+		}
+		if (url.pathname === "/api/jobs" && request.method === "GET") {
+			const items = (await host.harness.snapshot(Jobs, context))?.items ?? [];
+			return Response.json({ jobs: [...items].sort((a, b) => (a.nextAt ?? Infinity) - (b.nextAt ?? Infinity)) });
+		}
+		const jobAction = /^\/api\/jobs\/(cancel|pause|resume)$/.exec(url.pathname)?.[1];
+		if (jobAction !== undefined && request.method === "POST") {
+			const body = await bodyOf(request, JobBody);
+			if (body instanceof Response) return body;
+			const job = await host.root.commit((tx) => (jobAction === "cancel" ? removeJob(tx, body.id) : jobAction === "pause" ? pauseJob(tx, body.id, "paused by the owner") : resumeJob(tx, body.id)), context);
+			const missing = jobAction === "cancel" ? `No job ${body.id}.` : jobAction === "pause" ? `No job ${body.id}, or it's already paused.` : `No job ${body.id}, or it isn't paused.`;
+			return job === undefined ? Response.json({ error: missing }, { status: 404 }) : Response.json(job);
 		}
 		if (url.pathname === "/api/memory" && request.method === "GET") {
 			const notes = (await host.harness.snapshot(Memory, context))?.notes ?? [];

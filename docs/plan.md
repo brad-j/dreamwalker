@@ -53,6 +53,7 @@
 9. Memory, from gaidin, for one agent: notes in every prompt, kept with `remember`, `update_memory` and `forget`, 500 characters a note and 8,000 in all, and the owner's `GET /api/memory` and `POST /api/memory/add`, `update` and `forget`, with `dreamwalker memory`, `remember` and `forget`. Not yet: asking before a write after outside text, which comes with approvals.
 10. Approvals, from gaidin, for one agent: a beforeTool hook that refuses a call that can't succeed, asks the owner about one its guard asks about, and waits up to 7 days, with the request id memoized on the tool task so a restart finds the same request. `fetch_url` (public addresses only, checked at connect time) asks for a host not allowed for good and offers to allow it; `remember`, `update_memory`, `forget` and `cancel_reminder` ask once outside text is in the conversation. `ask_owner` asks a question; the owner's next message answers it, or closes a waiting approval as superseded. `GET /api/approvals`, `POST /api/approvals/decide`, `answer` and `forget-host`; `dreamwalker requests`, `approve`, `deny` and `answer`; each outcome in the transcript. Not yet: gaidin's rules, redaction, and Slack's buttons.
 11. Web search through the AI Gateway: pi-ai can't hand the model Anthropic's server-side web search, so `web_search` makes its own request to Claude with that tool on (`@anthropic-ai/sdk`, at the version pi-ai pins), on the site's model and credentials, and returns the results and Claude's cited notes, labelled as the web's. Its cost (tokens and a cent a search) goes into Pi Durable's usage, so the spend guard counts it. Searching doesn't ask; its results are outside text; a URL it returned fetches without asking. None on the faux model.
+12. Scheduled jobs, from gaidin without gates or agents: `schedule_job` (once, every 6 hours or more, or at a local time on some days; report or watch), `list_jobs` and `cancel_job`; each run in a fresh conversation without the job tools, seeing its last 3 reports and the quiet runs since; failures back off from 15 minutes to 4 hours and pause the job after 5 in a row; every new job asks, and cancelling asks after outside text. Reports go through notifications (ntfy when it's set) and into the conversation, where the app shows them; `/api/jobs` with pause, resume and cancel, on the app's Schedule page and as `dreamwalker jobs`, `pause-job`, `resume-job` and `cancel-job`.
 
 ## Open questions
 
@@ -64,4 +65,4 @@
 ## Next
 
 1. Sandboxes, once the site can use them: an `ExecutionEnv` over a Netlify Sandbox, checked with `registerEnvConformance`, and `CodingTools`.
-2. From gaidin, in order: scheduled jobs, Slack, agents, then redaction and rules.
+2. From gaidin, in order: Slack, agents, then redaction and rules.

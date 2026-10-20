@@ -1,12 +1,19 @@
 // Notifications, from gaidin: everything dreamwalker tells the owner without being asked, and which way each goes.
-// Reminders and budget warnings are handed here as notices; each way of reaching the owner writes a notice its own
-// way. For now that's ntfy alone; Slack and Web Push join when they're ported.
+// Reminders, job reports and budget warnings are handed here as notices; each way of reaching the owner writes a
+// notice its own way. For now that's ntfy alone; the app shows reports in the conversation either way.
 //
-//   reminder   ntfy, which must reach the owner
-//   budget     the same
+//   reminder         ntfy, which must reach the owner
+//   report, paused   the same
+//   budget           the same
+import type { Report } from "./jobs.ts";
 import type { Reminder } from "./reminders.ts";
 
-export type Notice = { kind: "reminder"; reminder: Reminder } | { kind: "budget"; text: string };
+export type Notice =
+	| { kind: "reminder"; reminder: Reminder }
+	| { kind: "report"; report: Report }
+	/** A job that paused after failing in a row, which the owner can resume. */
+	| { kind: "paused"; report: Report }
+	| { kind: "budget"; text: string };
 
 /** One way to reach the owner. `send` resolves with whether it reached anyone, and throws when it failed. */
 export type Adapter = { send(notice: Notice): Promise<boolean> };
@@ -17,6 +24,9 @@ function describe(notice: Notice): string {
 	switch (notice.kind) {
 		case "reminder":
 			return `reminder: ${notice.reminder.text}`;
+		case "report":
+		case "paused":
+			return `${notice.report.title}: ${notice.report.text}`;
 		case "budget":
 			return `budget: ${notice.text}`;
 	}

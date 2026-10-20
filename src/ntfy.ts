@@ -19,7 +19,7 @@ async function post(ntfy: NtfySettings, body: string, headers: Headers, request:
 	if (!response.ok) throw new Error(`ntfy answered ${response.status}`);
 }
 
-/** ntfy as a way to reach the owner: reminders as alarms, and budget warnings as text. */
+/** ntfy as a way to reach the owner: reminders as alarms, job reports and budget warnings as text. */
 export function ntfyAdapter(ntfy: NtfySettings, request: typeof fetch = fetch): Adapter {
 	return {
 		async send(notice) {
@@ -30,6 +30,13 @@ export function ntfyAdapter(ntfy: NtfySettings, request: typeof fetch = fetch): 
 				case "budget":
 					await post(ntfy, notice.text, new Headers({ Title: "dreamwalker: budget", Tags: "moneybag" }), request);
 					return true;
+				case "report":
+				case "paused": {
+					const text = notice.report.text.length > 3000 ? `${notice.report.text.slice(0, 3000)}…` : notice.report.text;
+					// Header values must be ASCII.
+					await post(ntfy, text, new Headers({ Title: `dreamwalker: ${notice.report.title}`.replace(/[^\x20-\x7e]/g, "?"), Tags: "calendar", Markdown: "yes" }), request);
+					return true;
+				}
 			}
 		},
 	};

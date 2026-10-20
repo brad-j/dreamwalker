@@ -7,6 +7,7 @@ import { AssistantEntry, createRegistry, defineExtension, type EntryRecord, Harn
 import { approvalExtension, ApprovalService } from "./approvals.ts";
 import { type BudgetSettings, budgetSettingsFrom, createBudget } from "./budget.ts";
 import { createFetch, type FetchOptions } from "./fetch.ts";
+import { createJobs } from "./jobs.ts";
 import { createSearch, type SearchBackend } from "./search.ts";
 import { createMemory } from "./memory.ts";
 import { type Chosen } from "./model.ts";
@@ -54,6 +55,12 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 		spend: options.spend,
 	});
 	const reminders = createReminders((reminder) => notifications.send({ kind: "reminder", reminder }), owner);
+	// A run the spend guard refused says why, rather than counting as the job failing.
+	const jobs = createJobs({
+		deliver: (report) => notifications.send(report.paused === true ? { kind: "paused", report } : { kind: "report", report }),
+		owner,
+		explain: (reason) => (reason === "no_model" ? budget.blocked() : undefined),
+	});
 	const registry = createRegistry();
 	registry.install(
 		defineExtension({
@@ -72,13 +79,14 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	const memory = createMemory(owner);
 	registry.install(memory.extension);
 	registry.install(reminders.extension);
+	registry.install(jobs.extension);
 	const web = createFetch(options.fetch, owner);
 	registry.install(web.extension);
 	// The service needs the Harness, which needs the registry; the hook reads it once something calls.
 	let approvals: ApprovalService | undefined;
 	const search = options.search === undefined ? undefined : createSearch(options.search, owner);
 	if (search !== undefined) registry.install(search.extension);
-	const guards = [...web.guards, ...(search?.guards ?? []), ...memory.guards, ...reminders.guards];
+	const guards = [...web.guards, ...(search?.guards ?? []), ...memory.guards, ...reminders.guards, ...jobs.guards];
 	registry.install(approvalExtension(() => approvals!, owner, () => guards));
 	registry.install(budget.extension);
 	const harness = await Harness.open(
@@ -135,7 +143,7 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 		}, context);
 	}
 
-	return { harness, root, ask, send, busy, budget, reminders, approvals, close: () => harness.close(context) };
+	return { harness, root, ask, send, busy, budget, reminders, jobs, approvals, close: () => harness.close(context) };
 }
 
 export type Host = Awaited<ReturnType<typeof openHost>>;

@@ -20,6 +20,9 @@ const USAGE = `usage: dreamwalker COMMAND
   approve ID [--always]     allow a call once, or with --always its wider grant (the host)
   deny ID                   refuse a call
   answer ID "TEXT"          answer a question; IDs can be shortened to their start
+  jobs                      scheduled jobs, soonest first
+  pause-job ID, resume-job ID, cancel-job ID
+                            pause a job's runs, start them again, or end it
 
 DREAMWALKER_URL and DREAMWALKER_TOKEN come from the environment or .env.`;
 
@@ -104,6 +107,26 @@ async function main(argv: string[]): Promise<number> {
 				const done = await client.decide(id, command === "deny" ? "deny" : values.always ? "always" : "once");
 				console.log(`${done.status}: ${done.summary}`);
 			}
+			return 0;
+		}
+		case "jobs": {
+			const { jobs } = await client.jobs();
+			if (jobs.length === 0) console.log("no scheduled jobs");
+			for (const j of jobs) {
+				const when = j.paused !== undefined ? `paused: ${j.paused.reason}` : j.nextAt === undefined ? "done" : `next ${new Date(j.nextAt).toLocaleString()}`;
+				const last = j.lastAt === undefined ? "" : `, last ${new Date(j.lastAt).toLocaleString()} (${j.lastResult}${j.failures ? `, ${j.failures} failed in a row` : ""})`;
+				console.log(`${j.taskId}  ${j.title}${j.mode === "watch" ? " (watch)" : ""}: ${when}${last}`);
+			}
+			return 0;
+		}
+		case "pause-job":
+		case "resume-job":
+		case "cancel-job": {
+			const id = Number(rest[0]);
+			if (!Number.isInteger(id)) throw new Error(`${command} needs a job id; dreamwalker jobs lists them`);
+			const action = command === "pause-job" ? "pause" : command === "resume-job" ? "resume" : "cancel";
+			const job = await client.job(action, id);
+			console.log(`${{ pause: "paused", resume: "resumed", cancel: "cancelled" }[action]}: ${job.title}`);
 			return 0;
 		}
 		case "wake":
