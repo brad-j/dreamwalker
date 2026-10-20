@@ -3,12 +3,13 @@
 // there are only gaidin's shared notes, named n1, n2 and so on.
 //
 // Notes outlive the conversation that wrote them, which makes them the place a planted instruction would want to land.
-// gaidin asks the owner before writing or forgetting one while outside text is in the conversation; that guard comes
-// with approvals, and until then dreamwalker has no tool that reads outside text.
+// So writing or forgetting one asks the owner first while outside text is in the conversation's context (`guards`). A
+// note that can't be written isn't put to the owner: it's refused first, so it isn't cut.
 import { Type } from "@earendil-works/pi-ai";
 import { BACKGROUND_CONTEXT as background } from "@earendil-works/chord/context";
-import { defineDoc, defineExtension, defineTool, section, type Tx } from "@earendil-works/pi-durable";
-import { ParseError, type Parser, text } from "./parse.ts";
+import { defineDoc, defineExtension, defineTool, type DocumentReader, section, type Tx } from "@earendil-works/pi-durable";
+import { guard, ifOutsideText, quoted } from "./guards.ts";
+import { object, ParseError, type Parser, string, text } from "./parse.ts";
 
 /** `by`: "owner", or "dreamwalker" when the agent wrote it. */
 export type Note = { id: number; text: string; createdAt: number; updatedAt: number; by: string };
@@ -128,5 +129,20 @@ export function createMemory(owner: string) {
 		},
 	});
 
-	return { extension: defineExtension({ name: "memory", sections: [memorySection], tools: [remember, update, forget] }) };
+	const notesIn = async (read: DocumentReader) => (await read.snapshot(Memory, background))?.notes ?? [];
+	const guards = [
+		guard("remember", object({ text: string }), {
+			refuse: async (a, read) => noteProblem(await notesIn(read), a.text),
+			ask: (a, situation) => ifOutsideText(situation, () => `remember "${tidy(a.text)}"`),
+		}),
+		guard("update_memory", object({ id: noteId, text: string }), {
+			refuse: async (a, read) => noteProblem(await notesIn(read), a.text, a.id),
+			ask: (a, situation) => ifOutsideText(situation, () => `change note ${label(a.id)} to "${tidy(a.text)}"`),
+		}),
+		guard("forget", object({ id: noteId }), {
+			ask: (a, situation) => ifOutsideText(situation, async () => `forget note ${label(a.id)}${quoted((await situation.snapshot(Memory))?.notes.find((n) => n.id === a.id)?.text)}`),
+		}),
+	];
+
+	return { extension: defineExtension({ name: "memory", sections: [memorySection], tools: [remember, update, forget] }), guards };
 }

@@ -16,6 +16,10 @@ const USAGE = `usage: dreamwalker COMMAND
   memory                    the notes dreamwalker keeps about you, which every prompt sees
   remember "TEXT"           add a note
   forget ID                 delete a note, such as n3
+  requests                  what's waiting for you: calls to allow and questions
+  approve ID [--always]     allow a call once, or with --always its wider grant (the host)
+  deny ID                   refuse a call
+  answer ID "TEXT"          answer a question; IDs can be shortened to their start
 
 DREAMWALKER_URL and DREAMWALKER_TOKEN come from the environment or .env.`;
 
@@ -28,8 +32,15 @@ function printBudget(b: BudgetStatus) {
 	if (b.stopped) console.log(`stopped: ${b.reason ?? "a limit was reached"}`);
 }
 
+/** The waiting request whose id starts with `prefix`, as `requests` shows them shortened. */
+async function fullId(client: ReturnType<typeof createClient>, prefix: string): Promise<string> {
+	const matches = (await client.requests()).requests.filter((r) => r.id.startsWith(prefix));
+	if (matches.length === 1) return matches[0]!.id;
+	throw new Error(matches.length === 0 ? `nothing waiting starts with ${prefix}` : `${prefix} matches ${matches.length} requests; give more of it`);
+}
+
 async function main(argv: string[]): Promise<number> {
-	const { values, positionals } = parseArgs({ args: argv, options: { id: { type: "string" }, help: { type: "boolean", short: "h" } }, allowPositionals: true });
+	const { values, positionals } = parseArgs({ args: argv, options: { id: { type: "string" }, always: { type: "boolean" }, help: { type: "boolean", short: "h" } }, allowPositionals: true });
 	const [command, ...rest] = positionals;
 	if (values.help || command === undefined || command === "help") {
 		console.log(USAGE);
@@ -73,6 +84,28 @@ async function main(argv: string[]): Promise<number> {
 			await client.forget(rest[0]);
 			console.log(`forgot ${rest[0]}`);
 			return 0;
+		case "requests": {
+			const { requests, fetchHosts } = await client.requests();
+			if (requests.length === 0) console.log("nothing waiting");
+			for (const r of requests) console.log(`${r.id.slice(0, 8)}  ${r.kind === "question" ? "question" : r.tool}: ${r.summary}${r.choices === undefined ? "" : `  [${r.choices.join(" / ")}]`}${r.always === undefined ? "" : `  (--always: ${r.always.label})`}`);
+			if (fetchHosts.length > 0) console.log(`hosts allowed for good: ${fetchHosts.join(", ")}`);
+			return 0;
+		}
+		case "approve":
+		case "deny":
+		case "answer": {
+			if (rest[0] === undefined) throw new Error(`${command} needs a request id; dreamwalker requests lists them`);
+			const id = await fullId(client, rest[0]);
+			if (command === "answer") {
+				const text = rest.slice(1).join(" ").trim();
+				if (text === "") throw new Error('answer needs the answer: dreamwalker answer ID "..."');
+				console.log(`answered: ${(await client.answer(id, text)).summary}`);
+			} else {
+				const done = await client.decide(id, command === "deny" ? "deny" : values.always ? "always" : "once");
+				console.log(`${done.status}: ${done.summary}`);
+			}
+			return 0;
+		}
 		case "wake":
 			console.log((await client.wake()) ? "awake" : "not awake");
 			return 0;

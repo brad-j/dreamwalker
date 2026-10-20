@@ -50,6 +50,7 @@
 7. The `dreamwalker` command: `ask`, `status`, `budget`, `allow` and `wake` over the API, with the URL and token from `.env`.
 8. Reminders, from gaidin, for one agent and the owner's phone: `remind`, `list_reminders` and `cancel_reminder`, a background task per reminder that survives restarts, five tries to push, and a record in the transcript. They reach the owner through ntfy (`NTFY_URL`, `NTFY_TOKEN`), or the server's log without it. Each message is stamped with the local time (`DREAMWALKER_TZ`) and the prompt names the owner (`DREAMWALKER_OWNER`). Not yet: gaidin's snooze buttons (the phone would carry the owner's token), speakers and agents, and the guard on cancelling, which comes with approvals.
 9. Memory, from gaidin, for one agent: notes in every prompt, kept with `remember`, `update_memory` and `forget`, 500 characters a note and 8,000 in all, and the owner's `GET /api/memory` and `POST /api/memory/add`, `update` and `forget`, with `dreamwalker memory`, `remember` and `forget`. Not yet: asking before a write after outside text, which comes with approvals.
+10. Approvals, from gaidin, for one agent: a beforeTool hook that refuses a call that can't succeed, asks the owner about one its guard asks about, and waits up to 7 days, with the request id memoized on the tool task so a restart finds the same request. `fetch_url` (public addresses only, checked at connect time) asks for a host not allowed for good and offers to allow it; `remember`, `update_memory`, `forget` and `cancel_reminder` ask once outside text is in the conversation. `ask_owner` asks a question; the owner's next message answers it, or closes a waiting approval as superseded. `GET /api/approvals`, `POST /api/approvals/decide`, `answer` and `forget-host`; `dreamwalker requests`, `approve`, `deny` and `answer`; each outcome in the transcript. Not yet: gaidin's rules, redaction, and Slack's buttons.
 
 ## Open questions
 
@@ -61,4 +62,4 @@
 ## Next
 
 1. Sandboxes, once the site can use them: an `ExecutionEnv` over a Netlify Sandbox, checked with `registerEnvConformance`, and `CodingTools`.
-2. From gaidin, in order: redaction and approvals (with the memory guard), scheduled jobs, Slack.
+2. From gaidin, in order: web search, scheduled jobs, Slack, agents, then redaction and rules.

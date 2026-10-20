@@ -2,7 +2,7 @@
 // Answers are parsed here, at the boundary; a refusal becomes an error carrying the server's own words.
 
 import { randomUUID } from "node:crypto";
-import { array, boolean, type Json, number, object, optional, parse, type Parser, string } from "./parse.ts";
+import { array, boolean, type Json, literal, number, object, optional, parse, type Parser, string } from "./parse.ts";
 
 export type ClientSettings = { url: string; token: string | undefined };
 
@@ -28,11 +28,13 @@ const Woke = object({ awake: boolean });
 const NoteAnswer = object({ id: number, text: string, by: string });
 const NotesAnswer = object({ notes: array(NoteAnswer), maxNote: number, maxTotal: number });
 const Ok = object({ ok: boolean });
+const RequestAnswer = object({ id: string, tool: string, summary: string, kind: optional(literal("question")), choices: optional(array(string)), always: optional(object({ label: string })), createdAt: number, status: string });
+const Requests = object({ requests: array(RequestAnswer), fetchHosts: array(string) });
 const BudgetAnswer = object({ today: number, month: number, dailyLimit: number, monthlyLimit: number, stopped: boolean, reason: optional(string) });
 
 export function createClient(settings: ClientSettings, request: typeof fetch = fetch) {
 	async function call<T>(path: string, parser: Parser<T>, init: { method?: string; body?: Json } = {}): Promise<T> {
-		const headers = new Headers({ "content-type": "application/json" });
+		const headers = new Headers({ "content-type": "application/json", "user-agent": "dreamwalker-cli" });
 		if (settings.token !== undefined) headers.set("authorization", `Bearer ${settings.token}`);
 		const response = await request(new URL(path, settings.url), { method: init.method ?? "GET", headers, body: init.body === undefined ? undefined : JSON.stringify(init.body) });
 		const text = await response.text();
@@ -62,6 +64,10 @@ export function createClient(settings: ClientSettings, request: typeof fetch = f
 		memory: () => call("/api/memory", NotesAnswer),
 		remember: (text: string) => call("/api/memory/add", NoteAnswer, { method: "POST", body: { text } }),
 		forget: async (id: string) => (await call("/api/memory/forget", Ok, { method: "POST", body: { id } })).ok,
+		/** What's waiting for the owner, and the hosts allowed for good. */
+		requests: () => call("/api/approvals", Requests),
+		decide: (id: string, decision: "once" | "always" | "deny") => call("/api/approvals/decide", RequestAnswer, { method: "POST", body: { id, decision } }),
+		answer: (id: string, text: string) => call("/api/approvals/answer", RequestAnswer, { method: "POST", body: { id, text } }),
 	};
 }
 

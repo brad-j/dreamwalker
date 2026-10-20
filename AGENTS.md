@@ -6,7 +6,7 @@ A personal agent for one person on Pi Durable, built for Netlify Server: the pla
 
 - `pnpm install`, then `pnpm check` before every commit: `tsc`, oxlint with the anti-slop rules, and every test.
 - One test file while working: `node --no-warnings --test test/api.test.ts`.
-- `pnpm dreamwalker ask "..."` (also `status`, `budget`, `allow`, `wake`, `memory`, `remember`, `forget`) talks to the server named by `DREAMWALKER_URL` with `DREAMWALKER_TOKEN`, both from `.env`.
+- `pnpm dreamwalker ask "..."` (also `status`, `budget`, `allow`, `wake`, `memory`, `remember`, `forget`, `requests`, `approve`, `deny`, `answer`) talks to the server named by `DREAMWALKER_URL` with `DREAMWALKER_TOKEN`, both from `.env`.
 - `DREAMWALKER_MODEL=faux pnpm dev` runs the server under `netlify dev` on a scripted model, with no key or network. It needs Node.js 24 and netlify-cli 27.10.0 or later.
 - Deploy by pushing to `main`; Netlify builds it. Not `netlify deploy`: from the CLI, new migrations are uploaded but not applied.
 - `netlify database migrations apply` (while `pnpm dev` runs) applies new migrations to the local database. Deploys apply them themselves.
@@ -23,6 +23,7 @@ A personal agent for one person on Pi Durable, built for Netlify Server: the pla
 - Nothing may live only in memory or on the instance's disk: an instance sleeps after five minutes without a request, is replaced after eight hours, and starts empty. Durable state goes through Pi Durable's storage or Netlify Blobs.
 - `getContext()` and anything built from it exist only while a request is being handled. Code that runs for reminders, jobs or resumed tasks can't use them.
 - Schema changes are new migration files in `netlify/database/migrations/`, never edits to an applied one and never DDL at runtime. That includes Pi Durable's tables when an upgrade raises its schema version.
+- The safety code is `src/approvals.ts`, `guards.ts`, `fetch.ts`, the guards beside each tool, `src/storage/lease.ts` and the token check in `src/api.ts`. A change that lets through anything these used to stop or ask about says so in its commit message and has a test. Never weaken or delete a test of them to make a change pass.
 - Satisfy the anti-slop lint rules (`tools/oxlint/anti-slop/`) by changing the code. Don't turn a rule off, add an override or add an ignore comment.
 - Pi Durable, pi-ai and chord are pinned and upgraded deliberately. Don't add or upgrade a package as part of a task; say that one is needed. pnpm resolves only versions at least 3 days old (`minimumReleaseAge: 4320`).
 - Nothing about the owner's own setup goes in code, tests or docs: no real names, site IDs, host names or home paths. Use `example.com` and `*.test` names, and call the person "the owner" in docs.

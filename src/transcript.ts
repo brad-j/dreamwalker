@@ -4,13 +4,15 @@
 
 import { AssistantEntry, type Conversation, type EntryRecord, ToolResultEntry, UserEntry } from "@earendil-works/pi-durable";
 import { context } from "./host.ts";
+import { ApprovalSettled } from "./approvals.ts";
 import { ReminderFired } from "./reminders.ts";
 
 export type Line =
 	| { kind: "you"; id: number; at: number; text: string }
 	| { kind: "answer"; id: number; at: number; text: string }
 	| { kind: "tool"; id: number; at: number; name: string; args: string; result?: string; error: boolean }
-	| { kind: "reminder"; id: number; at: number; text: string; delivered: boolean };
+	| { kind: "reminder"; id: number; at: number; text: string; delivered: boolean }
+	| { kind: "approval"; id: number; at: number; tool: string; summary: string; status: string; decision?: string; by?: string; question: boolean; answer?: string };
 
 /** A message's text: the string, or its text parts joined. */
 const textOf = (content: string | readonly { type: string; text?: string }[]) => (Array.isArray(content) ? content.flatMap((c) => (c.type === "text" && c.text !== undefined ? [c.text] : [])).join("") : String(content));
@@ -42,6 +44,9 @@ export function linesOf(entries: readonly EntryRecord[]): Line[] {
 				call.result = textOf(message.content);
 				call.error = message.isError;
 			}
+		} else if (ApprovalSettled.is(entry) && entry.data !== undefined) {
+			const d = entry.data;
+			lines.push({ kind: "approval", id: entry.id, at: d.decidedAt ?? 0, tool: d.tool, summary: d.summary, status: d.status, decision: d.decision, by: d.by, question: d.kind === "question", answer: d.answer });
 		} else if (ReminderFired.is(entry) && entry.data !== undefined) {
 			lines.push({ kind: "reminder", id: entry.id, at: entry.data.at, text: entry.data.text, delivered: entry.data.delivered });
 		}

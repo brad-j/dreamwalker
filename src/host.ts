@@ -4,7 +4,9 @@
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { AssistantEntry, createRegistry, defineExtension, type EntryRecord, Harness, section, type Storage } from "@earendil-works/pi-durable";
+import { approvalExtension, ApprovalService } from "./approvals.ts";
 import { type BudgetSettings, budgetSettingsFrom, createBudget } from "./budget.ts";
+import { createFetch, type FetchOptions } from "./fetch.ts";
 import { createMemory } from "./memory.ts";
 import { type Chosen } from "./model.ts";
 import { type Adapters, createNotifications } from "./notifications.ts";
@@ -32,6 +34,10 @@ export type HostOptions = {
 	notify?: (text: string) => Promise<void>;
 	/** Replaces how the spend guard totals spend; tests use it. */
 	spend?: (harness: Harness) => Promise<number>;
+	/** How fetch_url resolves names and which addresses it refuses; tests replace them. */
+	fetch?: FetchOptions;
+	/** How long a request waits for the owner. Default: 7 days. */
+	approvalTimeoutMs?: number;
 };
 
 export async function openHost(storage: Storage, chosen: Chosen, options: HostOptions = {}) {
@@ -60,8 +66,15 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 			],
 		}),
 	);
-	registry.install(createMemory(owner).extension);
+	const memory = createMemory(owner);
+	registry.install(memory.extension);
 	registry.install(reminders.extension);
+	const web = createFetch(options.fetch, owner);
+	registry.install(web.extension);
+	// The service needs the Harness, which needs the registry; the hook reads it once something calls.
+	let approvals: ApprovalService | undefined;
+	const guards = [...web.guards, ...memory.guards, ...reminders.guards];
+	registry.install(approvalExtension(() => approvals!, owner, () => guards));
 	registry.install(budget.extension);
 	const harness = await Harness.open(
 		storage,
@@ -78,6 +91,7 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	// The conversation keeps the model it was made with; the site's setting decides it instead, so a conversation started
 	// on another model (the faux one before Claude was switched on) doesn't ask for one this server doesn't have.
 	await root.configure({ model: chosen.model }, context);
+	approvals = new ApprovalService(harness, { timeoutMs: options.approvalTimeoutMs });
 	// After the root exists, before anything runs: a resumed run is checked against the limits too.
 	await budget.attach(harness);
 	harness.resume();
@@ -85,8 +99,13 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	/** Why a run ended unanswered, in words. A run the spend guard refused says which limit. */
 	const explain = (reason: string) => (reason === "no_model" ? (budget.blocked() ?? `no_model: ${chosen.model.provider}/${chosen.model.modelId} isn't in the model catalog`) : reason);
 
-	/** Sends `message` to the root conversation, stamped with the time, and waits for the answer. `requestId` makes a retry find the same run. */
-	async function ask(message: string, requestId?: string) {
+	/**
+	 * Sends `message` to the root conversation, stamped with the time, and waits for the answer. `requestId` makes a retry
+	 * find the same run. A message while a question waits is its answer; one while a call waits for approval closes that
+	 * request, so the run goes on and the message is answered after it.
+	 */
+	async function ask(message: string, requestId?: string, by = "cli") {
+		if ((await approvals!.intercept(root.id, message, by)) === "answered") return { ok: true as const, text: "", answered: true };
 		const submission = await root.submit({ type: "input", content: stamp(message), requestId }, context);
 		const settled = await submission.wait(context);
 		if (settled.status !== "done" || settled.type !== "input") return { ok: false as const, reason: settled.status === "unanswered" ? explain(settled.reason) : "not an input" };
@@ -94,9 +113,11 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 		return { ok: true as const, text: assistantText(answer) ?? "" };
 	}
 
-	/** Queues `message` without waiting for the answer, for callers that can't hold a request open that long. */
-	async function send(message: string, requestId?: string): Promise<void> {
+	/** Queues `message` without waiting for the answer, for callers that can't hold a request open that long. True when it answered a question instead. */
+	async function send(message: string, requestId?: string, by = "web"): Promise<boolean> {
+		if ((await approvals!.intercept(root.id, message, by)) === "answered") return true;
 		await root.submit({ type: "input", content: stamp(message), requestId }, context);
+		return false;
 	}
 
 	/** Whether the root conversation is working on something: a run in progress or queued, not a reminder waiting. */
@@ -109,7 +130,7 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 		}, context);
 	}
 
-	return { harness, root, ask, send, busy, budget, reminders, close: () => harness.close(context) };
+	return { harness, root, ask, send, busy, budget, reminders, approvals, close: () => harness.close(context) };
 }
 
 export type Host = Awaited<ReturnType<typeof openHost>>;

@@ -1,8 +1,10 @@
-// Reminders, from gaidin, for one agent and the owner's phone: gaidin's speakers, agents and the guard on cancelling
-// come with the modules they belong to. A reminder is a background task that sleeps until its time, so it survives a
+// Reminders, from gaidin, for one agent and the owner's phone: gaidin's speakers and agents come with the modules they
+// belong to. Cancelling asks while outside text is in the conversation, so a page can't quietly undo what the owner set. A reminder is a background task that sleeps until its time, so it survives a
 // restart, and one that came due while the server was asleep fires as soon as it wakes.
 import { Type } from "@earendil-works/pi-ai";
 import { type ConversationId, defineDoc, defineEntry, defineExtension, defineTask, defineTool, type TaskId, type Tx } from "@earendil-works/pi-durable";
+import { guard, ifOutsideText, quoted } from "./guards.ts";
+import { number, object } from "./parse.ts";
 import { formatClock, formatTime } from "./time.ts";
 
 export type Reminder = { taskId: number; text: string; at: number };
@@ -143,8 +145,15 @@ export function createReminders(notify: Notify, owner = "the user") {
 		},
 	});
 
+	const guards = [
+		guard("cancel_reminder", object({ id: number }), {
+			ask: (a, situation) => ifOutsideText(situation, async () => `cancel reminder ${a.id}${quoted((await situation.snapshot(Reminders))?.items.find((r) => r.taskId === a.id)?.text)}`),
+		}),
+	];
+
 	return {
 		ReminderTask,
+		guards,
 		extension: defineExtension({
 			name: "reminders",
 			tools: [remind, listReminders, cancelReminder],

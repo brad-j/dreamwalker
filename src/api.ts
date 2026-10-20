@@ -8,7 +8,7 @@ import { platformNames, type ReadEnv, type VariableNames } from "./environment.t
 import type { Instance } from "./instance.ts";
 import type { Credentials } from "./model.ts";
 import { addNote, forgetNote, MAX_NOTE, MAX_TOTAL, Memory, noteId, noteProblem, updateNote } from "./memory.ts";
-import { number, object, optional, parse, ParseError, type Parser, string } from "./parse.ts";
+import { literal, number, object, optional, parse, ParseError, type Parser, string } from "./parse.ts";
 import { context } from "./host.ts";
 import { Reminders, removeReminder } from "./reminders.ts";
 import { transcript } from "./transcript.ts";
@@ -19,6 +19,9 @@ const AddNoteBody = object({ text: string });
 const UpdateNoteBody = object({ id: noteId, text: string });
 const ForgetNoteBody = object({ id: noteId });
 const CancelReminderBody = object({ id: number });
+const DecideBody = object({ id: string, decision: literal("once", "always", "deny") });
+const AnswerBody = object({ id: string, text: string });
+const HostBody = object({ host: string });
 
 export type ApiOptions = {
 	/** The owner's token; undefined refuses every guarded route unless `local`. */
@@ -52,6 +55,9 @@ async function bodyOf<T>(request: Request, parser: Parser<T>): Promise<T | Respo
 		throw error;
 	}
 }
+
+/** Where an answer came from: the dreamwalker command says so; anything else is the app. */
+const by = (request: Request) => (request.headers.get("user-agent")?.startsWith("dreamwalker-cli") ? "cli" : "web");
 
 const message = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
@@ -92,6 +98,28 @@ export function createApi(instance: Instance, options: ApiOptions) {
 			const amount = body.amount ?? host.budget.limits.daily;
 			if (amount <= 0) return Response.json({ error: "amount should be more than 0" }, { status: 400 });
 			return Response.json(await host.budget.allowMore(amount));
+		}
+		if (url.pathname === "/api/approvals" && request.method === "GET") {
+			const { fetchHosts } = await host.approvals.state();
+			return Response.json({ requests: await host.approvals.pending(), fetchHosts });
+		}
+		if (url.pathname === "/api/approvals/decide" && request.method === "POST") {
+			const body = await bodyOf(request, DecideBody);
+			if (body instanceof Response) return body;
+			const decided = await host.approvals.decide(body.id, body.decision, by(request));
+			return decided === undefined ? Response.json({ error: "No such request waiting" }, { status: 404 }) : Response.json(decided);
+		}
+		if (url.pathname === "/api/approvals/answer" && request.method === "POST") {
+			const body = await bodyOf(request, AnswerBody);
+			if (body instanceof Response) return body;
+			const answered = await host.approvals.answer(body.id, body.text, by(request));
+			return answered === undefined ? Response.json({ error: "No such question waiting, or an empty answer" }, { status: 404 }) : Response.json(answered);
+		}
+		if (url.pathname === "/api/approvals/forget-host" && request.method === "POST") {
+			const body = await bodyOf(request, HostBody);
+			if (body instanceof Response) return body;
+			await host.approvals.disallowHost(body.host);
+			return Response.json({ ok: true });
 		}
 		if (url.pathname === "/api/transcript" && request.method === "GET") {
 			const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 300, 1), 1000);
@@ -136,8 +164,8 @@ export function createApi(instance: Instance, options: ApiOptions) {
 		if (url.pathname === "/api/send" && request.method === "POST") {
 			const body = await bodyOf(request, AskBody);
 			if (body instanceof Response) return body;
-			await host.send(body.message, body.requestId);
-			return Response.json({ sent: true }, { status: 202 });
+			const answered = await host.send(body.message, body.requestId, "web");
+			return Response.json({ sent: true, answered }, { status: 202 });
 		}
 		if (url.pathname === "/api/ask" && request.method === "POST") {
 			const body = await bodyOf(request, AskBody);
