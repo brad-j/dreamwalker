@@ -13,6 +13,7 @@ import { memoryStorage, startInstance } from "../../src/instance.ts";
 import { Credentials, modelFor, modelSettingsFrom } from "../../src/model.ts";
 import { ntfyAdapter, ntfySettingsFrom } from "../../src/ntfy.ts";
 import { claudeSearch } from "../../src/search.ts";
+import { probe, SandboxCredentials, sandboxFor } from "../../src/sandbox.ts";
 import { openDatabaseStorage } from "../../src/storage/index.ts";
 
 export const config: Config = { path: "/api/*" };
@@ -27,6 +28,7 @@ const connectionString = () => {
 const storage = memory ? memoryStorage : () => openDatabaseStorage({ connectionString });
 const settings = modelSettingsFrom(process.env);
 const credentials = new Credentials();
+const sandboxCredentials = new SandboxCredentials();
 const ntfy = ntfySettingsFrom(process.env);
 const owner = process.env.DREAMWALKER_OWNER || undefined;
 const budget = budgetSettingsFrom(process.env);
@@ -56,7 +58,9 @@ export default createApi(instance, {
 	see: (read) => {
 		databaseUrl.see(read);
 		credentials.see(read);
+		sandboxCredentials.see(read);
 	},
+	probe: async () => probe(await sandboxFor(sandboxCredentials, platformEnv, "dreamwalker-probe")),
 	credentials,
 	describe: () => ({
 		startedAt,
@@ -64,6 +68,7 @@ export default createApi(instance, {
 		context: platformEnv("CONTEXT"),
 		storageKind: memory ? "memory" : "Netlify Database",
 		databaseUrlAgeSeconds: databaseUrl.age(),
+		sandboxCredentialsAgeSeconds: sandboxCredentials.age(),
 		owner: owner ?? "the user (DREAMWALKER_OWNER isn't set)",
 		timeZone: budget.timeZone,
 		modelId: settings.provider === "faux" ? "faux" : settings.id,

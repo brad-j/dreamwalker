@@ -35,6 +35,8 @@ export type ApiOptions = {
 	/** Looks at the environment on every request, keeping what only a request shows: the model's credentials, the database's address. */
 	see: (read: ReadEnv) => void;
 	credentials: Credentials;
+	/** Makes or finds a sandbox and says what's in it, for `/api/sandbox/probe`; absent where there are no sandboxes. */
+	probe?: () => Promise<Record<string, string | number>>;
 	/** What the status route reports about the instance. */
 	describe: () => Record<string, string | number | boolean | undefined | VariableNames>;
 };
@@ -89,6 +91,14 @@ export function createApi(instance: Instance, options: ApiOptions) {
 				() => undefined,
 			);
 			return Response.json({ ...options.describe(), storage, budget, model: options.credentials.describe(options.env), variablesNow: platformNames() });
+		}
+		if (url.pathname === "/api/sandbox/probe" && request.method === "POST") {
+			if (options.probe === undefined) return Response.json({ error: "No sandboxes here" }, { status: 404 });
+			try {
+				return Response.json(await options.probe());
+			} catch (error) {
+				return Response.json({ error: message(error) }, { status: 502 });
+			}
 		}
 		const host = await instance.host();
 		if (host === undefined) return replaced();
