@@ -10,12 +10,15 @@ import type { Credentials } from "./model.ts";
 import { addNote, forgetNote, MAX_NOTE, MAX_TOTAL, Memory, noteId, noteProblem, updateNote } from "./memory.ts";
 import { number, object, optional, parse, ParseError, type Parser, string } from "./parse.ts";
 import { context } from "./host.ts";
+import { Reminders, removeReminder } from "./reminders.ts";
+import { transcript } from "./transcript.ts";
 
 const AskBody = object({ message: string, requestId: optional(string) });
 const AllowBody = object({ amount: optional(number) });
 const AddNoteBody = object({ text: string });
 const UpdateNoteBody = object({ id: noteId, text: string });
 const ForgetNoteBody = object({ id: noteId });
+const CancelReminderBody = object({ id: number });
 
 export type ApiOptions = {
 	/** The owner's token; undefined refuses every guarded route unless `local`. */
@@ -89,6 +92,20 @@ export function createApi(instance: Instance, options: ApiOptions) {
 			const amount = body.amount ?? host.budget.limits.daily;
 			if (amount <= 0) return Response.json({ error: "amount should be more than 0" }, { status: 400 });
 			return Response.json(await host.budget.allowMore(amount));
+		}
+		if (url.pathname === "/api/transcript" && request.method === "GET") {
+			const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 300, 1), 1000);
+			return Response.json({ lines: await transcript(host.root, limit) });
+		}
+		if (url.pathname === "/api/reminders" && request.method === "GET") {
+			const items = (await host.harness.snapshot(Reminders, context))?.items ?? [];
+			return Response.json({ reminders: [...items].sort((a, b) => a.at - b.at) });
+		}
+		if (url.pathname === "/api/reminders/cancel" && request.method === "POST") {
+			const body = await bodyOf(request, CancelReminderBody);
+			if (body instanceof Response) return body;
+			const removed = await host.root.commit((tx) => removeReminder(tx, body.id), context);
+			return removed === undefined ? Response.json({ error: `No open reminder ${body.id}.` }, { status: 404 }) : Response.json({ ok: true });
 		}
 		if (url.pathname === "/api/memory" && request.method === "GET") {
 			const notes = (await host.harness.snapshot(Memory, context))?.notes ?? [];
