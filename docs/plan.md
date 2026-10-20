@@ -46,16 +46,17 @@
 3. Claude through the AI Gateway with credentials kept between requests, the owner's token on every route but health and wake, `/api/wake`, and `/api/status` (the deploy, the storage, and where the model's credentials came from and how old they are, never the key).
 4. The spend guard: daily and monthly limits, 80% and stop warnings, `GET /api/budget` and `POST /api/budget/allow`, and the storage opening on the first request.
 5. Deployed: the site runs as a Netlify Server, production is public with previews behind the team's login, and it answers with Claude (Haiku 5.5) through the AI Gateway, from Netlify Database, under the spend guard. A conversation started on another model takes the site's model when the host opens.
+6. Staying awake: a scheduled function requests `/api/wake` every four minutes.
+7. The `dreamwalker` command: `ask`, `status`, `budget`, `allow` and `wake` over the API, with the URL and token from `.env`.
 
 ## Open questions
 
 - `DEPLOY_ID` isn't set inside a deployed Netlify Server, so every instance counts as the newest. That's still safe, since the fence stops whichever lost the lease, but an old deploy's URL could take the lease back from production. The request's context has the deploy ID; the lease could take it from the first request.
 - How long the Gateway's credentials stay good after the request that brought them. If it's shorter than the gap between wake-ups, background calls need a key set on the site.
+- Sandboxes: the SDK is `plinthwick` on npm, despite its description. Pi's own remote environment, `pi-env`, needs its daemon started as a local child process, which a Netlify Server shouldn't spawn, so dreamwalker's `ExecutionEnv` will be its own over the SDK's commands and files. What the sandbox image has (a shell, coreutils, python) decides how its file operations are built.
 - Commits are a dozen or so round trips on one connection. Fine in the same region as the database; worth measuring once deployed.
 
 ## Next
 
-1. Something pinging `/api/wake` every few minutes, and a check of how long the Gateway's credentials last for a model call outside a request (the first reminders will make them).
-2. Sandboxes: an `ExecutionEnv` over a Netlify Sandbox, checked with `registerEnvConformance`, and `CodingTools`.
-3. A CLI that talks to the API with the owner's token.
-4. From gaidin, in order: reminders and ntfy, memory, redaction and approvals, scheduled jobs, Slack.
+1. Sandboxes, once the site can use them: an `ExecutionEnv` over a Netlify Sandbox, checked with `registerEnvConformance`, and `CodingTools`.
+2. From gaidin, in order: reminders and ntfy (and with them, how long the Gateway's credentials last for a model call outside a request), memory, redaction and approvals, scheduled jobs, Slack.

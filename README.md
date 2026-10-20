@@ -18,11 +18,22 @@ pnpm check                            # type check, lint and tests
 
 Conversations are kept in Netlify Database, which `netlify dev` runs locally; a deploy applies the migrations itself. `DREAMWALKER_STORAGE=memory` keeps them in memory instead, gone on restart.
 
-For Claude, set `ANTHROPIC_API_KEY` instead of `DREAMWALKER_MODEL=faux`. `DREAMWALKER_MODEL_ID` picks the model, `claude-haiku-5-5` by default.
+## The command
+
+With `DREAMWALKER_URL` and `DREAMWALKER_TOKEN` in `.env` (or `DREAMWALKER_URL=http://localhost:8888` under `netlify dev`):
+
+```sh
+pnpm dreamwalker ask "remind me what we talked about"
+pnpm dreamwalker status       # the instance, storage, budget and model credentials
+pnpm dreamwalker budget       # today's and this month's spend against the limits
+pnpm dreamwalker allow 5      # let today go $5 past the daily limit
+```
+
+On Netlify, Claude comes through the AI Gateway with no key of your own. Locally, set `ANTHROPIC_API_KEY` instead of `DREAMWALKER_MODEL=faux`. `DREAMWALKER_MODEL_ID` picks the model, `claude-haiku-5-5` by default.
 
 ## Status
 
-Early: one conversation over HTTP, kept in Netlify Database, and not yet deployed. [docs/plan.md](docs/plan.md) has the decisions and what's next.
+Early: one conversation with Claude over HTTP and the `dreamwalker` command, kept in Netlify Database, under a spend limit, and deployed by pushing to `main`. [docs/plan.md](docs/plan.md) has the decisions and what's next.
 
 ## License
 

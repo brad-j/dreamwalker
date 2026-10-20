@@ -6,6 +6,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dreamwalker": "node --no-warnings --env-file-if-exists=.env src/main.ts",
     "dev": "EXPERIMENTAL_NETLIFY_SERVER=true netlify dev",
     "check": "tsc && pnpm lint && pnpm test",
     "lint": "oxlint --deny-warnings src test netlify",
@@ -30,5 +31,8 @@
     "@types/pg": "8.23.1",
     "oxlint": "1.87.0",
     "typescript": "^7.0.2"
+  },
+  "bin": {
+    "dreamwalker": "src/main.ts"
   }
 }
