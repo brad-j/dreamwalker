@@ -1,10 +1,14 @@
 // The Harness and the root conversation, over whichever storage it's given: Netlify Database on the platform, memory
-// in tests and for `DREAMWALKER_STORAGE=memory`. Every model request passes the spend guard first.
+// in tests and for `DREAMWALKER_STORAGE=memory`. Every model request passes the spend guard first, and everything
+// told to the owner unprompted (reminders, budget warnings) goes through notifications.ts.
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { AssistantEntry, createRegistry, type EntryRecord, Harness, type Storage } from "@earendil-works/pi-durable";
+import { AssistantEntry, createRegistry, defineExtension, type EntryRecord, Harness, section, type Storage } from "@earendil-works/pi-durable";
 import { type BudgetSettings, budgetSettingsFrom, createBudget } from "./budget.ts";
 import { type Chosen } from "./model.ts";
+import { type Adapters, createNotifications } from "./notifications.ts";
+import { createReminders } from "./reminders.ts";
+import { setTimeZone, stamp } from "./time.ts";
 
 export const context = BACKGROUND_CONTEXT;
 
@@ -17,21 +21,45 @@ export function assistantText(entry: EntryRecord | undefined): string | undefine
 }
 
 export type HostOptions = {
-	/** Default: $5 a day, $50 a month, days in UTC. */
+	/** What dreamwalker calls the owner, in its prompt and tool descriptions. Default: "the user". */
+	owner?: string;
+	/** Default: $5 a day, $50 a month, days and times in UTC. Its time zone is the one times are shown in. */
 	budget?: BudgetSettings;
-	/** How the spend guard tells the owner. Default: the server's log, until there's a way to reach the owner. */
+	/** The ways to reach the owner. Default: none, so notices go to the server's log. */
+	adapters?: Adapters;
+	/** Replaces how the spend guard tells the owner; tests use it. Default: through the adapters. */
 	notify?: (text: string) => Promise<void>;
 	/** Replaces how the spend guard totals spend; tests use it. */
 	spend?: (harness: Harness) => Promise<number>;
 };
 
 export async function openHost(storage: Storage, chosen: Chosen, options: HostOptions = {}) {
+	const owner = options.owner ?? "the user";
+	const settings = options.budget ?? budgetSettingsFrom({});
+	setTimeZone(settings.timeZone);
+	const notifications = createNotifications(options.adapters ?? {});
 	const budget = createBudget({
-		settings: options.budget ?? budgetSettingsFrom({}),
-		notify: options.notify ?? (async (text) => console.warn("[budget]", text)),
+		settings,
+		notify: options.notify ?? ((text) => notifications.send({ kind: "budget", text })),
 		spend: options.spend,
 	});
+	const reminders = createReminders((reminder) => notifications.send({ kind: "reminder", reminder }), owner);
 	const registry = createRegistry();
+	registry.install(
+		defineExtension({
+			name: "dreamwalker",
+			sections: [
+				section(
+					"preamble",
+					() =>
+						`You are dreamwalker, ${owner}'s personal agent. Each of ${owner}'s messages starts with the local time in brackets, ` +
+						`which is the time to use for anything said about "now", "today" or "at 3".`,
+					{ tag: false },
+				),
+			],
+		}),
+	);
+	registry.install(reminders.extension);
 	registry.install(budget.extension);
 	const harness = await Harness.open(
 		storage,
@@ -55,16 +83,16 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	/** Why a run ended unanswered, in words. A run the spend guard refused says which limit. */
 	const explain = (reason: string) => (reason === "no_model" ? (budget.blocked() ?? `no_model: ${chosen.model.provider}/${chosen.model.modelId} isn't in the model catalog`) : reason);
 
-	/** Sends `message` to the root conversation and waits for the answer. `requestId` makes a retry find the same run. */
+	/** Sends `message` to the root conversation, stamped with the time, and waits for the answer. `requestId` makes a retry find the same run. */
 	async function ask(message: string, requestId?: string) {
-		const submission = await root.submit({ type: "input", content: message, requestId }, context);
+		const submission = await root.submit({ type: "input", content: stamp(message), requestId }, context);
 		const settled = await submission.wait(context);
 		if (settled.status !== "done" || settled.type !== "input") return { ok: false as const, reason: settled.status === "unanswered" ? explain(settled.reason) : "not an input" };
 		const answer = await root.commit((tx) => tx.entry(AssistantEntry, settled.answer), context);
 		return { ok: true as const, text: assistantText(answer) ?? "" };
 	}
 
-	return { harness, root, ask, budget, close: () => harness.close(context) };
+	return { harness, root, ask, budget, reminders, close: () => harness.close(context) };
 }
 
 export type Host = Awaited<ReturnType<typeof openHost>>;

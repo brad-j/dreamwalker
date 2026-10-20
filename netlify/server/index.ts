@@ -11,6 +11,7 @@ import { budgetSettingsFrom } from "../../src/budget.ts";
 import { platformEnv, platformNames, Remembered } from "../../src/environment.ts";
 import { memoryStorage, startInstance } from "../../src/instance.ts";
 import { Credentials, modelFor, modelSettingsFrom } from "../../src/model.ts";
+import { ntfyAdapter, ntfySettingsFrom } from "../../src/ntfy.ts";
 import { openDatabaseStorage } from "../../src/storage/index.ts";
 
 export const config: Config = { path: "/api/*" };
@@ -25,7 +26,12 @@ const connectionString = () => {
 const storage = memory ? memoryStorage : () => openDatabaseStorage({ connectionString });
 const settings = modelSettingsFrom(process.env);
 const credentials = new Credentials();
-const instance = startInstance(storage, modelFor(settings, credentials), { budget: budgetSettingsFrom(process.env) });
+const ntfy = ntfySettingsFrom(process.env);
+const instance = startInstance(storage, modelFor(settings, credentials), {
+	owner: process.env.DREAMWALKER_OWNER || undefined,
+	budget: budgetSettingsFrom(process.env),
+	adapters: ntfy === undefined ? {} : { ntfy: ntfyAdapter(ntfy) },
+});
 
 // Closing the storage gives the lease up, so the next instance needn't wait for it to run out. The package's hook
 // and the spec's exported function are both here until it's clear which the platform calls.
@@ -51,6 +57,7 @@ export default createApi(instance, {
 		storageKind: memory ? "memory" : "Netlify Database",
 		databaseUrlAgeSeconds: databaseUrl.age(),
 		modelId: settings.provider === "faux" ? "faux" : settings.id,
+		notifications: ntfy === undefined ? "none: NTFY_URL isn't set, so reminders go to the log" : "ntfy",
 		variablesAtStartup,
 	}),
 });

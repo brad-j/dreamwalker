@@ -79,7 +79,9 @@ export function modelFor(settings: ModelSettings, credentials = new Credentials(
 		const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1" }] });
 		const step = (ctx: { messages: readonly { role: string; content?: unknown }[] }) => {
 			const last = ctx.messages.findLast((m) => m.role === "user");
-			return fauxAssistantMessage(fauxText(`You said: ${JSON.stringify(last?.content)}`));
+			// What the owner typed, without the time stamp in front of it.
+			const said = JSON.stringify(last?.content).replace(/^"\[[^\]]*\] /, '"');
+			return fauxAssistantMessage(fauxText(`You said: ${said}`));
 		};
 		faux.setResponses(Array.from({ length: 1000 }, () => step));
 		models.setProvider(faux.provider);

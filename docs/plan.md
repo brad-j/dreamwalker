@@ -48,15 +48,16 @@
 5. Deployed: the site runs as a Netlify Server, production is public with previews behind the team's login, and it answers with Claude (Haiku 5.5) through the AI Gateway, from Netlify Database, under the spend guard. A conversation started on another model takes the site's model when the host opens.
 6. Staying awake: a scheduled function requests `/api/wake` every four minutes.
 7. The `dreamwalker` command: `ask`, `status`, `budget`, `allow` and `wake` over the API, with the URL and token from `.env`.
+8. Reminders, from gaidin, for one agent and the owner's phone: `remind`, `list_reminders` and `cancel_reminder`, a background task per reminder that survives restarts, five tries to push, and a record in the transcript. They reach the owner through ntfy (`NTFY_URL`, `NTFY_TOKEN`), or the server's log without it. Each message is stamped with the local time (`DREAMWALKER_TZ`) and the prompt names the owner (`DREAMWALKER_OWNER`). Not yet: gaidin's snooze buttons (the phone would carry the owner's token), speakers and agents, and the guard on cancelling, which comes with approvals.
 
 ## Open questions
 
 - `DEPLOY_ID` isn't set inside a deployed Netlify Server, so every instance counts as the newest. That's still safe, since the fence stops whichever lost the lease, but an old deploy's URL could take the lease back from production. The request's context has the deploy ID; the lease could take it from the first request.
-- How long the Gateway's credentials stay good after the request that brought them. If it's shorter than the gap between wake-ups, background calls need a key set on the site.
+- How long the Gateway's credentials stay good after the request that brought them. If it's shorter than the gap between wake-ups, background calls need a key set on the site. Scheduled jobs are the first model calls made outside a request; reminders only push.
 - Sandboxes: the SDK is `plinthwick` on npm, despite its description. Pi's own remote environment, `pi-env`, needs its daemon started as a local child process, which a Netlify Server shouldn't spawn, so dreamwalker's `ExecutionEnv` will be its own over the SDK's commands and files. What the sandbox image has (a shell, coreutils, python) decides how its file operations are built.
 - Commits are a dozen or so round trips on one connection. Fine in the same region as the database; worth measuring once deployed.
 
 ## Next
 
 1. Sandboxes, once the site can use them: an `ExecutionEnv` over a Netlify Sandbox, checked with `registerEnvConformance`, and `CodingTools`.
-2. From gaidin, in order: reminders and ntfy (and with them, how long the Gateway's credentials last for a model call outside a request), memory, redaction and approvals, scheduled jobs, Slack.
+2. From gaidin, in order: memory, redaction and approvals, scheduled jobs, Slack.
