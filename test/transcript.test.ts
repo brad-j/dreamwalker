@@ -48,3 +48,33 @@ test("the transcript has the owner's words without the stamp, tool calls with th
 	assert.equal((await cancel(reminders[0].taskId)).status, 404);
 	assert.deepEqual((await get("/api/reminders")).reminders, []);
 });
+
+test("send queues a message and returns at once, and the transcript says it's busy until the answer is in", async (t) => {
+	let release: () => void = () => undefined;
+	const held = new Promise<void>((resolve) => (release = resolve));
+	const instance = startInstance(
+		async () => new MemoryStorage(),
+		fauxModels([async () => {
+			await held;
+			return fauxAssistantMessage(fauxText("there"));
+		}]),
+		{ notify: async () => undefined },
+	);
+	t.after(() => instance.close());
+	const api = createApi(instance, { token: "t", local: false, env: envFrom({}), see: () => undefined, credentials: new Credentials(), describe: () => ({}) });
+	const headers = { authorization: "Bearer t", "content-type": "application/json" };
+	const get = async () => (await api(new Request("http://dreamwalker.test/api/transcript", { headers }))).json();
+
+	const sent = await api(new Request("http://dreamwalker.test/api/send", { method: "POST", headers, body: JSON.stringify({ message: "hi", requestId: "s-1" }) }));
+	assert.equal(sent.status, 202);
+	assert.equal((await get()).busy, true);
+	release();
+	const end = Date.now() + 5000;
+	let after = await get();
+	while (after.busy && Date.now() < end) {
+		await new Promise((r) => setTimeout(r, 20));
+		after = await get();
+	}
+	assert.equal(after.busy, false);
+	assert.deepEqual(after.lines.map((l: { kind: string; text: string }) => [l.kind, l.text]), [["you", "hi"], ["answer", "there"]]);
+});

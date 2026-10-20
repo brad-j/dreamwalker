@@ -95,7 +95,7 @@ export function createApi(instance: Instance, options: ApiOptions) {
 		}
 		if (url.pathname === "/api/transcript" && request.method === "GET") {
 			const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 300, 1), 1000);
-			return Response.json({ lines: await transcript(host.root, limit) });
+			return Response.json({ lines: await transcript(host.root, limit), busy: await host.busy() });
 		}
 		if (url.pathname === "/api/reminders" && request.method === "GET") {
 			const items = (await host.harness.snapshot(Reminders, context))?.items ?? [];
@@ -132,6 +132,12 @@ export function createApi(instance: Instance, options: ApiOptions) {
 			if (body instanceof Response) return body;
 			const removed = await host.root.commit((tx) => forgetNote(tx, body.id), context);
 			return removed === undefined ? Response.json({ error: `No note n${body.id}.` }, { status: 404 }) : Response.json({ ok: true });
+		}
+		if (url.pathname === "/api/send" && request.method === "POST") {
+			const body = await bodyOf(request, AskBody);
+			if (body instanceof Response) return body;
+			await host.send(body.message, body.requestId);
+			return Response.json({ sent: true }, { status: 202 });
 		}
 		if (url.pathname === "/api/ask" && request.method === "POST") {
 			const body = await bodyOf(request, AskBody);

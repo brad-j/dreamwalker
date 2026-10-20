@@ -94,7 +94,22 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 		return { ok: true as const, text: assistantText(answer) ?? "" };
 	}
 
-	return { harness, root, ask, budget, reminders, close: () => harness.close(context) };
+	/** Queues `message` without waiting for the answer, for callers that can't hold a request open that long. */
+	async function send(message: string, requestId?: string): Promise<void> {
+		await root.submit({ type: "input", content: stamp(message), requestId }, context);
+	}
+
+	/** Whether the root conversation is working on something: a run in progress or queued, not a reminder waiting. */
+	async function busy(): Promise<boolean> {
+		return root.commit(async (tx) => {
+			for (const status of ["pending", "running", "waiting", "completing"] as const) {
+				if ((await tx.scanTasks({ conversationId: root.id, background: false, status }, 1)).items.length > 0) return true;
+			}
+			return false;
+		}, context);
+	}
+
+	return { harness, root, ask, send, busy, budget, reminders, close: () => harness.close(context) };
 }
 
 export type Host = Awaited<ReturnType<typeof openHost>>;
