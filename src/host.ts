@@ -45,12 +45,15 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 		context,
 	);
 	const root = await harness.root(context, { agent: { model: chosen.model } });
+	// The conversation keeps the model it was made with; the site's setting decides it instead, so a conversation started
+	// on another model (the faux one before Claude was switched on) doesn't ask for one this server doesn't have.
+	await root.configure({ model: chosen.model }, context);
 	// After the root exists, before anything runs: a resumed run is checked against the limits too.
 	await budget.attach(harness);
 	harness.resume();
 
 	/** Why a run ended unanswered, in words. A run the spend guard refused says which limit. */
-	const explain = (reason: string) => (reason === "no_model" ? (budget.blocked() ?? reason) : reason);
+	const explain = (reason: string) => (reason === "no_model" ? (budget.blocked() ?? `no_model: ${chosen.model.provider}/${chosen.model.modelId} isn't in the model catalog`) : reason);
 
 	/** Sends `message` to the root conversation and waits for the answer. `requestId` makes a retry find the same run. */
 	async function ask(message: string, requestId?: string) {

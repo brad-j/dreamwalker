@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { NetlifyDB } from "@netlify/database-dev";
+import { createModels } from "@earendil-works/pi-ai/models";
+import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
 import { createStorageConformance } from "@earendil-works/pi-durable/testing";
 import pg from "pg";
@@ -146,4 +148,19 @@ test("an instance whose lease was taken stops and says so", async () => {
 	assert.equal(response.status, 503);
 	await next.close();
 	await old.close();
+});
+
+test("a conversation started on one model carries on with the one the site is set to", async () => {
+	await reset();
+	const first = await openHost(await openDatabaseStorage({ connectionString }), modelFor({ provider: "faux" }));
+	assert.equal((await first.ask("before")).ok, true);
+	await first.close();
+	// Another provider entirely, as when the faux model gives way to Claude: the old one isn't registered any more.
+	const faux2 = fauxProvider({ provider: "faux-two", models: [{ id: "two" }] });
+	faux2.setResponses([fauxAssistantMessage(fauxText("from the new model"))]);
+	const models = createModels();
+	models.setProvider(faux2.provider);
+	const second = await openHost(await openDatabaseStorage({ connectionString }), { models, model: { provider: "faux-two", modelId: "two" } });
+	assert.deepEqual(await second.ask("after"), { ok: true, text: "from the new model" });
+	await second.close();
 });
