@@ -1,3 +1,7 @@
 # Everything is served by netlify/server/index.ts. Keep index.html out of public/: it would shadow the server's /.
 [build]
   publish = "public"
+
+[build.environment]
+  # Netlify Server runs Node.js 24; build with the same.
+  NODE_VERSION = "24"
