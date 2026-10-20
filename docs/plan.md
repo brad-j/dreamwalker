@@ -14,6 +14,7 @@
 - Production is public and previews keep the team's login: Netlify's login and password both use the `Authorization` header our token does, and pings and webhooks can't sign in.
 - The storage opens on the first request, not at startup: in a deployed Server, `NETLIFY_DB_URL` isn't in the environment while the module loads.
 - Every route but `/api/health` and `/api/wake` needs the owner's token (`DREAMWALKER_TOKEN`, a secret on the site); without one they're refused except under `netlify dev`.
+- Production deploys come from git: a push to `main` builds on Netlify. `netlify deploy` from the CLI (27.13.0) uploads the migrations but doesn't apply them on a site with a Server; a git build does.
 - Same conventions as gaidin: pnpm, `pnpm check` (tsc, oxlint with the anti-slop rules, tests on the faux model), packages at least 3 days old.
 
 ## The platform, as dreamwalker relies on it
@@ -44,17 +45,17 @@
 2. Netlify Database storage: Pi Durable's SQLite storage on a Postgres facade, its schema as a migration, the lease, and reopening after a storage failure. Tests run Pi Durable's 24 storage conformance cases on an in-process Postgres (`@netlify/database-dev`); under `netlify dev` a conversation survives a restart.
 3. Claude through the AI Gateway with credentials kept between requests, the owner's token on every route but health and wake, `/api/wake`, and `/api/status` (the deploy, the storage, and where the model's credentials came from and how old they are, never the key).
 4. The spend guard: daily and monthly limits, 80% and stop warnings, `GET /api/budget` and `POST /api/budget/allow`, and the storage opening on the first request.
-5. Deployed: the site runs as a Netlify Server, and production runs the server on the faux model.
+5. Deployed: the site runs as a Netlify Server, production is public with previews behind the team's login, and it answers with Claude (Haiku 5.5) through the AI Gateway, from Netlify Database, under the spend guard. A conversation started on another model takes the site's model when the host opens.
 
 ## Open questions
 
-- Whether `DEPLOY_ID` is set inside a deployed Netlify Server (it's `0` under `netlify dev`). Without it every instance counts as the newest, which is still safe, since the fence stops the one that lost the lease, but an old deploy's URL could then take the lease back from production.
+- `DEPLOY_ID` isn't set inside a deployed Netlify Server, so every instance counts as the newest. That's still safe, since the fence stops whichever lost the lease, but an old deploy's URL could take the lease back from production. The request's context has the deploy ID; the lease could take it from the first request.
 - How long the Gateway's credentials stay good after the request that brought them. If it's shorter than the gap between wake-ups, background calls need a key set on the site.
 - Commits are a dozen or so round trips on one connection. Fine in the same region as the database; worth measuring once deployed.
 
 ## Next
 
-1. Claude in production, once production is public: remove `DREAMWALKER_MODEL`, check the Gateway's credentials in `/api/status`, and set something pinging `/api/wake`.
+1. Something pinging `/api/wake` every few minutes, and a check of how long the Gateway's credentials last for a model call outside a request (the first reminders will make them).
 2. Sandboxes: an `ExecutionEnv` over a Netlify Sandbox, checked with `registerEnvConformance`, and `CodingTools`.
 3. A CLI that talks to the API with the owner's token.
 4. From gaidin, in order: reminders and ntfy, memory, redaction and approvals, scheduled jobs, Slack.
