@@ -18,6 +18,7 @@ import { type ConversationId, defineDoc, defineEntry, defineExtension, defineToo
 import type { Ask, Guard, Situation } from "./guards.ts";
 import { conversationId, taskId } from "./ids.ts";
 import { ParseError } from "./parse.ts";
+import { searchedUrls } from "./search.ts";
 
 export type Decision = "once" | "always" | "deny";
 /** "superseded": the owner sent a new message in the conversation instead of answering. */
@@ -365,7 +366,7 @@ export function approvalExtension(service: () => ApprovalService, owner: string,
 						conversationId: api.conversationId,
 						callId: call.id,
 						outside: () => outsideTextIn(api, context, (tool) => all.some((g) => g.tool === tool && g.outside), call.id),
-						searched: async () => [],
+						searched: async () => searchedUrls((await contextOf(api, context)) ?? []),
 						snapshot: (doc) => api.snapshot(doc, context),
 					});
 					if (ask === undefined) return undefined;

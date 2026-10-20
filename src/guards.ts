@@ -27,7 +27,7 @@ export type Situation = {
 	callId: string;
 	/** The outside-text tools whose results are in the conversation's context. It reads the context, so call it only when it matters. */
 	outside: () => Promise<string[]>;
-	/** The URLs a search returned in the conversation's context; none until search is ported. */
+	/** The URLs web_search returned in the conversation's context. It reads the context too. */
 	searched: () => Promise<string[]>;
 	snapshot: Snapshot;
 };

@@ -12,6 +12,7 @@ import { platformEnv, platformNames, Remembered } from "../../src/environment.ts
 import { memoryStorage, startInstance } from "../../src/instance.ts";
 import { Credentials, modelFor, modelSettingsFrom } from "../../src/model.ts";
 import { ntfyAdapter, ntfySettingsFrom } from "../../src/ntfy.ts";
+import { claudeSearch } from "../../src/search.ts";
 import { openDatabaseStorage } from "../../src/storage/index.ts";
 
 export const config: Config = { path: "/api/*" };
@@ -29,8 +30,13 @@ const credentials = new Credentials();
 const ntfy = ntfySettingsFrom(process.env);
 const owner = process.env.DREAMWALKER_OWNER || undefined;
 const budget = budgetSettingsFrom(process.env);
-const instance = startInstance(storage, modelFor(settings, credentials), {
+const chosen = modelFor(settings, credentials);
+// Search runs on Claude too, through the same credentials; there's none on the faux model.
+const search =
+	settings.provider === "faux" ? undefined : claudeSearch(() => credentials.current(platformEnv), settings.id, chosen.models.getModel("anthropic", settings.id)?.cost);
+const instance = startInstance(storage, chosen, {
 	owner,
+	search,
 	budget,
 	adapters: ntfy === undefined ? {} : { ntfy: ntfyAdapter(ntfy) },
 });

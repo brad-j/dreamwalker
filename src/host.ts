@@ -7,6 +7,7 @@ import { AssistantEntry, createRegistry, defineExtension, type EntryRecord, Harn
 import { approvalExtension, ApprovalService } from "./approvals.ts";
 import { type BudgetSettings, budgetSettingsFrom, createBudget } from "./budget.ts";
 import { createFetch, type FetchOptions } from "./fetch.ts";
+import { createSearch, type SearchBackend } from "./search.ts";
 import { createMemory } from "./memory.ts";
 import { type Chosen } from "./model.ts";
 import { type Adapters, createNotifications } from "./notifications.ts";
@@ -38,6 +39,8 @@ export type HostOptions = {
 	fetch?: FetchOptions;
 	/** How long a request waits for the owner. Default: 7 days. */
 	approvalTimeoutMs?: number;
+	/** How web_search searches; without one there's no web_search, as on the faux model. */
+	search?: SearchBackend;
 };
 
 export async function openHost(storage: Storage, chosen: Chosen, options: HostOptions = {}) {
@@ -73,7 +76,9 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	registry.install(web.extension);
 	// The service needs the Harness, which needs the registry; the hook reads it once something calls.
 	let approvals: ApprovalService | undefined;
-	const guards = [...web.guards, ...memory.guards, ...reminders.guards];
+	const search = options.search === undefined ? undefined : createSearch(options.search, owner);
+	if (search !== undefined) registry.install(search.extension);
+	const guards = [...web.guards, ...(search?.guards ?? []), ...memory.guards, ...reminders.guards];
 	registry.install(approvalExtension(() => approvals!, owner, () => guards));
 	registry.install(budget.extension);
 	const harness = await Harness.open(
