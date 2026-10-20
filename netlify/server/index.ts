@@ -27,9 +27,11 @@ const storage = memory ? memoryStorage : () => openDatabaseStorage({ connectionS
 const settings = modelSettingsFrom(process.env);
 const credentials = new Credentials();
 const ntfy = ntfySettingsFrom(process.env);
+const owner = process.env.DREAMWALKER_OWNER || undefined;
+const budget = budgetSettingsFrom(process.env);
 const instance = startInstance(storage, modelFor(settings, credentials), {
-	owner: process.env.DREAMWALKER_OWNER || undefined,
-	budget: budgetSettingsFrom(process.env),
+	owner,
+	budget,
 	adapters: ntfy === undefined ? {} : { ntfy: ntfyAdapter(ntfy) },
 });
 
@@ -56,6 +58,8 @@ export default createApi(instance, {
 		context: platformEnv("CONTEXT"),
 		storageKind: memory ? "memory" : "Netlify Database",
 		databaseUrlAgeSeconds: databaseUrl.age(),
+		owner: owner ?? "the user (DREAMWALKER_OWNER isn't set)",
+		timeZone: budget.timeZone,
 		modelId: settings.provider === "faux" ? "faux" : settings.id,
 		notifications: ntfy === undefined ? "none: NTFY_URL isn't set, so reminders go to the log" : "ntfy",
 		variablesAtStartup,
