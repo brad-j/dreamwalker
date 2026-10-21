@@ -64,7 +64,32 @@ const workspace = {
 	env: (dir: string) => new SandboxEnv({ ...workerSandbox, cwd: `${WORKER_LAYOUT.work}/${dir}`, ownHome: true }),
 	clear: async (dir: string) => clearTask(await workerSandbox.box(), WORKER_LAYOUT, dir),
 };
+// The server's secrets as they stand, redacted from every tool result: the owner's token, ntfy's, the Netlify tools'
+// token, and what only requests show (the Gateway's key, the database's address and password, the sandboxes' token).
+const secrets = () => {
+	const named = (name: string, value: string | undefined) => (value === undefined || value === "" ? [] : [{ name, value }]);
+	const db = databaseUrl.current(platformEnv);
+	return [
+		...named("DREAMWALKER_TOKEN", process.env.DREAMWALKER_TOKEN),
+		...named("NTFY_TOKEN", process.env.NTFY_TOKEN),
+		...named("NTFY_URL", process.env.NTFY_URL),
+		...Object.entries(process.env).flatMap(([name, value]) => (name.startsWith("NETLIFY_AGENT_PAT") ? named(name, value) : [])),
+		...named("ANTHROPIC_API_KEY", credentials.current(platformEnv)?.apiKey),
+		...named("NETLIFY_DB_URL", db),
+		...named("NETLIFY_DB_PASSWORD", db === undefined ? undefined : decodeURIComponent(URL.parse(db)?.password ?? "")),
+		...named("NETLIFY_SANDBOX_TOKEN", sandboxToken()),
+	];
+};
+/** The sandboxes' token, or nothing when their context hasn't been seen or doesn't read. */
+const sandboxToken = () => {
+	try {
+		return sandboxCredentials.current(platformEnv)?.token;
+	} catch {
+		return undefined;
+	}
+};
 const instance = startInstance(storage, chosen, {
+	secrets,
 	owner,
 	search,
 	workspace,

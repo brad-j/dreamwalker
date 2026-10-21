@@ -18,6 +18,7 @@ import { type Adapters, createNotifications } from "./notifications.ts";
 import { OwnerMarks, OwnerMessage } from "./outside.ts";
 import { Agents, DEFAULT_AGENT, inheritAgent } from "./roster.ts";
 import { createNetlify, type NetlifySettings } from "./netlify.ts";
+import { redaction, type Secret } from "./redact.ts";
 import { createReminders } from "./reminders.ts";
 import { setTimeZone, stamp } from "./time.ts";
 import { createWorker } from "./worker.ts";
@@ -47,6 +48,8 @@ export type HostOptions = {
 	 * and `clear` clears what a task left once it ends. Without one there are none.
 	 */
 	workspace?: { env: (dir: string) => ExecutionEnv; clear: (dir: string) => Promise<void> };
+	/** The server's secrets as they stand, redacted from every tool result (redact.ts). Default: none. */
+	secrets?: () => readonly Secret[];
 	/** The Netlify tools' token and team, and a fake API for tests; without settings the tools say they aren't set up. */
 	netlify?: { settings?: NetlifySettings; fetch?: typeof globalThis.fetch };
 };
@@ -79,15 +82,16 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	const web = createFetch(options.fetch, owner);
 	const search = options.search === undefined ? undefined : createSearch(options.search, owner);
 	const workspace = options.workspace === undefined ? undefined : createWorkspace(owner);
-	const workerTools = [web.extension, ...(search === undefined ? [] : [search.extension]), ...(workspace?.extensions ?? [])];
+	const redacting = redaction(options.secrets ?? (() => []));
+	const workerTools = [web.extension, ...(search === undefined ? [] : [search.extension]), ...(workspace?.extensions ?? []), redacting];
 	const worker = createWorker({ owner, model: chosen.model, tools: [...workerTools, budget.extension], clear: options.workspace?.clear });
 	const guards = [...web.guards, ...(search?.guards ?? []), ...(workspace?.guards ?? []), ...worker.guards, ...netlify.guards, ...memory.guards, ...reminders.guards, ...jobs.guards];
 	// The service needs the Harness, which needs the registry; the hook reads it once something calls.
 	let approvals: ApprovalService | undefined;
 	// The main agent's tools, which every conversation has unless it says otherwise: the root, and the runs of jobs.
-	const main = [preamble, memory.extension, reminders.extension, jobs.extension, worker.extension, approvalExtension(() => approvals!, owner, () => guards), budget.extension];
+	const main = [preamble, memory.extension, reminders.extension, jobs.extension, worker.extension, approvalExtension(() => approvals!, owner, () => guards), budget.extension, redacting];
 	const registry = createRegistry();
-	for (const extension of [...main, worker.instructions, ...workerTools, netlify.extension]) registry.install(extension);
+	for (const extension of new Set([...main, worker.instructions, ...workerTools, netlify.extension])) registry.install(extension);
 	const harness = await Harness.open(
 		storage,
 		{
