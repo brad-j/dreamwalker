@@ -215,7 +215,7 @@ test("the API lists requests and decides them, and the transcript records how ea
 
 test("a call whose arguments its guard can't read is asked about, showing all of them, not let through", async () => {
 	const guards = [...createJobs({ deliver: async () => undefined, owner: "the owner" }).guards, ...createMemory("the owner").guards];
-	const situation: Situation = { conversationId: 1, callId: "c1", outside: async () => ["fetch_url"], outsideThisTurn: async () => [], snapshot: async () => undefined };
+	const situation: Situation = { conversationId: 1, callId: "c1", outside: async () => ["fetch_url"], outsideThisTurn: async () => [], holdsOwnerData: async () => true, snapshot: async () => undefined };
 	const ask = (name: string, args: Record<string, string | number | string[]>) => askFor(guards.find((g) => g.tool === name)!, { type: "toolCall", id: "c1", name, arguments: args }, situation);
 	assert.match((await ask("schedule_job", { title: ["Briefing"], instruction: "Brief me." }))!.summary, /^schedule_job with arguments that don't read right/);
 	const remember = await ask("remember", { text: 5 });

@@ -218,7 +218,16 @@ async function findJob(tx: Tx, taskId: number): Promise<Job | undefined> {
 	return (await tx.doc(Jobs)).items.find((j) => j.taskId === taskId);
 }
 
-export function createJobs(options: { deliver: Deliver; owner: string; explain?: (reason: string | undefined) => string | undefined }) {
+export function createJobs(options: {
+	deliver: Deliver;
+	owner: string;
+	explain?: (reason: string | undefined) => string | undefined;
+	/**
+	 * What a run doesn't get besides the job tools: the owner's notes. A run reads its earlier reports, which are outside
+	 * text, before anything the owner says, so it holds nothing of theirs for a page to have it send out.
+	 */
+	withhold?: () => readonly Extension[];
+}) {
 	const { owner } = options;
 
 	function prompt(job: Job): string {
@@ -320,12 +329,12 @@ export function createJobs(options: { deliver: Deliver; owner: string; explain?:
 				const { at, firing, conversationId } = task.state.checkpoint;
 				if (conversationId === undefined) {
 					// A conversation for this run, owned by the job: it starts as a copy of the settings of the conversation the job
-					// was made in, without that conversation's history and without the job tools.
+					// was made in, without that conversation's history, the job tools or what's withheld (the owner's notes).
 					await runtime.commit(async (tx) => {
 						const job = await findJob(tx, task.id);
 						if (job === undefined) return { status: "terminal", outcome: { status: "completed", result: "cancelled" } };
 						const created = await tx.createConversation({ ownership: { kind: "task", taskId: runtime.taskId } });
-						await configure(tx, created.id, { extensions: { remove: [extension] } });
+						await configure(tx, created.id, { extensions: { remove: [extension, ...(options.withhold?.() ?? [])] } });
 						return { status: "running", checkpoint: { ...task.state.checkpoint, conversationId: created.id } };
 					}, context);
 					return;

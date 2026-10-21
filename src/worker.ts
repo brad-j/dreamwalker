@@ -101,7 +101,12 @@ export function createWorker(options: WorkerOptions) {
 		instructions,
 		guards: [
 			guard("delegate", object({ task: string }), {
-				ask: (a, situation) => ifOutsideTextThisTurn(situation, () => `hand a worker this task: ${clip(a.task, 300)}`).then((ask) => (ask === undefined ? undefined : { ...ask, detail: a.task })),
+				// A conversation without the owner's notes, like a job's run, has none of their data to put in a task.
+				ask: async (a, situation) => {
+					if (!(await situation.holdsOwnerData())) return undefined;
+					const ask = await ifOutsideTextThisTurn(situation, () => `hand a worker this task: ${clip(a.task, 300)}`);
+					return ask === undefined ? undefined : { ...ask, detail: a.task };
+				},
 				outside: true,
 			}),
 		],

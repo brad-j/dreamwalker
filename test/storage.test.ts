@@ -125,7 +125,7 @@ test("a conversation survives a restart", async () => {
 	const view = await second.root.viewState(context);
 	const said = view.value.entries.map((e) => e.kind);
 	view.dispose();
-	assert.deepEqual(said.filter((k) => k === "pi.user" || k === "pi.assistant"), ["pi.user", "pi.assistant"]);
+	assert.deepEqual(said.filter((k) => k === "dreamwalker.owner" || k === "pi.assistant"), ["dreamwalker.owner", "pi.assistant"]);
 	await second.close();
 });
 

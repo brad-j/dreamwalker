@@ -25,8 +25,10 @@ export type Situation = {
 	callId: string;
 	/** The outside-text tools whose results are in the conversation's context. It reads the context, so call it only when it matters. */
 	outside: () => Promise<string[]>;
-	/** The same, counting only results since the owner's last message. */
+	/** The same, counting only what came in since the owner's last message. */
 	outsideThisTurn: () => Promise<string[]>;
+	/** Whether the conversation holds the owner's notes: the main agent's does, a job run's or a worker's doesn't. */
+	holdsOwnerData: () => Promise<boolean>;
 	snapshot: Snapshot;
 };
 

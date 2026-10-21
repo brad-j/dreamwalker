@@ -198,7 +198,7 @@ test("a job that runs too often or has no room is refused before asking", async 
 
 test("every new job asks, showing the whole instruction, and cancelling asks after outside text", async () => {
 	const { guards } = createJobs({ deliver: async () => undefined, owner: "the owner" });
-	const situation = (outside: string[]): Situation => ({ conversationId: 1, callId: "c1", outside: async () => outside, outsideThisTurn: async () => [], snapshot: async () => ({ items: [{ taskId: 7, title: "Backups" }] }) as never });
+	const situation = (outside: string[]): Situation => ({ conversationId: 1, callId: "c1", outside: async () => outside, outsideThisTurn: async () => [], holdsOwnerData: async () => true, snapshot: async () => ({ items: [{ taskId: 7, title: "Backups" }] }) as never });
 	const schedule = guards.find((g) => g.tool === "schedule_job")!;
 	const long = "y".repeat(2000);
 	const asked = await schedule.ask({ title: "Briefing", instruction: long, time: "08:00", days: "weekdays", mode: "watch" }, situation([]));

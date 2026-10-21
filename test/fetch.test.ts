@@ -7,7 +7,7 @@ import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/provid
 import type { Situation } from "../src/guards.ts";
 import { blockedRanges, createFetch, fetchPublic, type FetchOptions, htmlToText, render } from "../src/fetch.ts";
 import { MemoryStorage } from "@earendil-works/pi-durable";
-import { context, openHost } from "../src/host.ts";
+import { openHost } from "../src/host.ts";
 import { call, fauxModels, say, workers } from "./helpers.ts";
 
 const PAGE = `<html><head><title>Fish &amp; Chips</title><script>alert("x")</script></head>
@@ -185,7 +185,7 @@ test("a worker can call fetch_url without asking, and an error status is an erro
 	t.after(() => host.close());
 	const asked: string[] = [];
 	host.approvals.onChange((r) => void (r.status === "pending" && asked.push(r.summary)));
-	assert.equal((await (await host.root.submit({ type: "input", content: "read the recipe" }, context)).wait(context)).status, "done");
+	assert.equal((await host.ask("read the recipe")).ok, true);
 	const [worker] = await workers(host.harness, host.root);
 	const results = worker!.filter((m) => m.role === "toolResult");
 	assert.match(JSON.stringify(results[0]), /Batter - light/);
@@ -200,7 +200,7 @@ test("htmlToText leaves an entity it doesn't know as it is, even one named like 
 test("a fetch doesn't ask, whatever its host, and what it returns is outside text", async () => {
 	const [guard] = createFetch().guards;
 	const ask = (url: unknown) => {
-		const situation: Situation = { conversationId: 1, callId: "c1", outside: async () => ["fetch_url"], outsideThisTurn: async () => [], snapshot: async () => undefined };
+		const situation: Situation = { conversationId: 1, callId: "c1", outside: async () => ["fetch_url"], outsideThisTurn: async () => [], holdsOwnerData: async () => true, snapshot: async () => undefined };
 		return guard!.ask({ url } as never, situation);
 	};
 	assert.equal(guard!.tool, "fetch_url");

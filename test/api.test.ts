@@ -30,7 +30,7 @@ test("the same request id finds the same run instead of asking twice", async () 
 	const again = await (await ask(JSON.stringify({ message: "once", requestId: "r-1" }))).json();
 	assert.deepEqual(again, first);
 	const view = await host.root.viewState(context);
-	const asked = view.value.entries.filter((e) => e.kind === "pi.user" && JSON.stringify(e.model).includes("once"));
+	const asked = view.value.entries.filter((e) => e.kind === "dreamwalker.owner" && JSON.stringify(e.model).includes("once"));
 	view.dispose();
 	assert.equal(asked.length, 1);
 });

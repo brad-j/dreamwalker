@@ -26,7 +26,7 @@ A personal agent for one person on Pi Durable, built for Netlify Server: the pla
 - Nothing may live only in memory or on the instance's disk: an instance sleeps after five minutes without a request, is replaced after eight hours, and starts empty. Durable state goes through Pi Durable's storage or Netlify Blobs.
 - `getContext()` and anything built from it exist only while a request is being handled. Code that runs for reminders, jobs or resumed tasks can't use them.
 - Schema changes are new migration files in `netlify/database/migrations/`, never edits to an applied one and never DDL at runtime. That includes Pi Durable's tables when an upgrade raises its schema version.
-- The safety code is `src/approvals.ts`, `guards.ts`, `fetch.ts`, `worker.ts` with which extensions the main agent and workers get in `host.ts`, `workspace.ts`, the sandboxes' network policies in `sandbox.ts`, the guards beside each tool, `src/storage/lease.ts` and the token check in `src/api.ts`. A change that lets through anything these used to stop or ask about says so in its commit message and has a test. Never weaken or delete a test of them to make a change pass.
+- The safety code is `src/approvals.ts`, `guards.ts`, `outside.ts`, `fetch.ts`, `worker.ts` with which extensions the main agent and workers get in `host.ts`, `workspace.ts`, the sandboxes' network policies in `sandbox.ts`, the guards beside each tool, `src/storage/lease.ts` and the token check in `src/api.ts`. A change that lets through anything these used to stop or ask about says so in its commit message and has a test. Never weaken or delete a test of them to make a change pass.
 - Satisfy the anti-slop lint rules (`tools/oxlint/anti-slop/`) by changing the code. Don't turn a rule off, add an override or add an ignore comment.
 - Pi Durable, pi-ai and chord are pinned and upgraded deliberately. Don't add or upgrade a package as part of a task; say that one is needed. pnpm resolves only versions at least 3 days old (`minimumReleaseAge: 4320`).
 - Nothing about the owner's own setup goes in code, tests or docs: no real names, site IDs, host names or home paths. Use `example.com` and `*.test` names, and call the person "the owner" in docs.
@@ -35,6 +35,8 @@ A personal agent for one person on Pi Durable, built for Netlify Server: the pla
 ## Mistakes agents have made
 
 Add a line here each time an agent gets something wrong that a line here would have prevented.
+
+- An agent took every user message for the owner's. Job prompts carrying earlier reports, and compaction summaries of history with outside text, came in as user messages too, so guards trusted them. The owner's messages are marked where they come in (`OwnerMessage`); anything else that reads as a user message is outside text unless `outside.ts` shows otherwise, so a new path into a conversation starts distrusted.
 
 - An agent opened the sandbox to the internet and stopped fetch_url asking, citing what Claude Code and Codex were said to do, and both do keep a gate. Before loosening a safety gate, check the claim, and say what the agent could then send where: it holds the owner's notes and conversation.
 - A sandbox keeps the network policy it was made with, and the SDK doesn't compare policies when it finds a sandbox by name. Changing a sandbox's policy under the same name changes nothing; it needs a new name, and the probe shows what the network reaches.

@@ -13,10 +13,11 @@
 import { randomUUID } from "node:crypto";
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT as background } from "@earendil-works/chord/context";
-import { type Message, type ToolCall, Type } from "@earendil-works/pi-ai";
-import { type ConversationId, defineDoc, defineEntry, defineExtension, defineTool, type DocumentReader, type Harness, type HookApi, hook, type ToolExecutionApi, ToolTask, type Tx } from "@earendil-works/pi-durable";
+import { type ToolCall, Type } from "@earendil-works/pi-ai";
+import { type ContextView, type ConversationId, defineDoc, defineEntry, defineExtension, defineTool, type DocumentReader, type EntryRecord, type Harness, type HookApi, hook, type ToolExecutionApi, ToolTask, type Tx } from "@earendil-works/pi-durable";
 import type { Ask, Guard, Situation } from "./guards.ts";
 import { conversationId, taskId } from "./ids.ts";
+import { historyHadOutside, OwnerMarks, provenance } from "./outside.ts";
 import { ParseError } from "./parse.ts";
 
 export type Decision = "once" | "deny";
@@ -98,10 +99,45 @@ export class ApprovalService {
 	readonly #timeoutMs: number;
 	readonly #waiters = new Map<string, Set<(request: ApprovalRequest) => void>>();
 	readonly #listeners = new Set<(request: ApprovalRequest) => void | Promise<void>>();
+	/** Whether the history each compaction summary replaced had outside text, by the summary's entry id: it never changes. */
+	readonly #summaries = new Map<string, Promise<boolean>>();
 
 	constructor(harness: Harness, options: { timeoutMs?: number } = {}) {
 		this.#harness = harness;
 		this.#timeoutMs = options.timeoutMs ?? 7 * 24 * 3_600_000;
+	}
+
+	/**
+	 * The outside sources in conversation `id`'s context `view` (outside.ts): all of them, and those since the owner's
+	 * last message. Without the view there's no telling what was read, so it all counts as outside text.
+	 */
+	async provenance(id: ConversationId, view: ContextView | undefined, isOutside: (tool: string) => boolean, callId: string): Promise<{ all: string[]; thisTurn: string[] }> {
+		if (view === undefined) return { all: ["a conversation it couldn't check"], thisTurn: ["a conversation it couldn't check"] };
+		const since = (await this.#harness.snapshot(OwnerMarks, background))?.since ?? -1;
+		const summarized = (summary: EntryRecord) => {
+			const key = `${id}:${summary.id}`;
+			let found = this.#summaries.get(key);
+			if (found === undefined) {
+				found = this.#historyHadOutside(id, summary, isOutside, since);
+				this.#summaries.set(key, found);
+				found.catch(() => this.#summaries.delete(key));
+			}
+			return found;
+		};
+		return provenance(view, id, { isOutside, callId, since, summarized });
+	}
+
+	async #historyHadOutside(id: ConversationId, summary: EntryRecord, isOutside: (tool: string) => boolean, since: number): Promise<boolean> {
+		const conversation = await this.#harness.conversation(id, background);
+		if (conversation === undefined) return true;
+		return historyHadOutside((maxEntryId, cursor) => conversation.entries({ maxEntryId }, 200, cursor, background), summary, id, { isOutside, since });
+	}
+
+	/** Whether conversation `id` holds the owner's notes, as the main agent's do and job runs' and workers' don't. */
+	async holdsOwnerData(id: ConversationId): Promise<boolean> {
+		const conversation = await this.#harness.conversation(id, background);
+		if (conversation === undefined) return true;
+		return (await conversation.agent(background)).extensions.some((extension) => extension.name === "memory");
 	}
 
 	async state(): Promise<ApprovalState> {
@@ -286,32 +322,13 @@ export function signalOf(api: ToolExecutionApi | HookApi, context: Context): Abo
 	return AbortSignal.any([context.abortSignal, closed].filter((s) => s !== undefined));
 }
 
-/**
- * The tools whose results are in the conversation's context and are text from outside (`isOutside`). Text the model
- * has read stays able to steer it for as long as it's in the context, whoever spoke since; compaction is what takes it
- * out. The context already holds a placeholder result for the call being decided, `callId`, which is skipped.
- */
-export async function outsideTextIn(api: HookApi, context: Context, isOutside: (tool: string) => boolean, callId?: string, thisTurn = false): Promise<string[]> {
-	const messages = await contextOf(api, context);
-	// Without the context there's no telling what was read, so it counts as outside text.
-	if (messages === undefined) return ["a conversation it couldn't check"];
-	const found = new Set<string>();
-	for (const message of messages) {
-		// The owner's messages are the only user messages here: reports and fired reminders are entries the model doesn't see.
-		if (thisTurn && message.role === "user") found.clear();
-		if (message.role !== "toolResult" || message.toolCallId === callId || !isOutside(message.toolName)) continue;
-		found.add(message.toolName);
-	}
-	return [...found];
-}
-
-/** The conversation's model context, or undefined when the hook's api can't read it. */
-async function contextOf(api: HookApi, context: Context): Promise<readonly Message[] | undefined> {
+/** The conversation's context view, or undefined when the hook's api can't read it. */
+async function contextOf(api: HookApi, context: Context): Promise<ContextView | undefined> {
 	if (!("context" in api) || !(api.context instanceof Function)) return undefined;
-	// SAFETY: the hook's api is the tool task's runtime, whose context(id) gives the conversation's model context;
+	// SAFETY: the hook's api is the tool task's runtime, whose context(id) gives the conversation's context view;
 	// HookApi's type doesn't declare it, so it's checked for above.
-	const read = api.context as (id: ConversationId, context: Context) => Promise<{ messages: readonly Message[] }>;
-	return (await read.call(api, api.conversationId, context)).messages;
+	const read = api.context as (id: ConversationId, context: Context) => Promise<ContextView>;
+	return read.call(api, api.conversationId, context);
 }
 
 /** The hook and ask_owner. `service` is read lazily, because the Harness the service needs is opened after the registry. */
@@ -352,11 +369,14 @@ export function approvalExtension(service: () => ApprovalService, owner: string,
 					const impossible = await refusalOf(guard, call, api, context);
 					if (impossible !== undefined) return { block: impossible };
 					const isOutside = (tool: string) => all.some((g) => g.tool === tool && g.outside);
+					let found: Promise<{ all: string[]; thisTurn: string[] }> | undefined;
+					const sources = () => (found ??= contextOf(api, context).then((view) => approvals.provenance(api.conversationId, view, isOutside, call.id)));
 					const ask = await askFor(guard, call, {
 						conversationId: api.conversationId,
 						callId: call.id,
-						outside: () => outsideTextIn(api, context, isOutside, call.id),
-						outsideThisTurn: () => outsideTextIn(api, context, isOutside, call.id, true),
+						outside: async () => (await sources()).all,
+						outsideThisTurn: async () => (await sources()).thisTurn,
+						holdsOwnerData: () => approvals.holdsOwnerData(api.conversationId),
 						snapshot: (doc) => api.snapshot(doc, context),
 					});
 					if (ask === undefined) return undefined;

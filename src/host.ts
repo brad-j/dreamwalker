@@ -14,6 +14,7 @@ import { createSearch, type SearchBackend } from "./search.ts";
 import { createMemory } from "./memory.ts";
 import { type Chosen } from "./model.ts";
 import { type Adapters, createNotifications } from "./notifications.ts";
+import { OwnerMarks, OwnerMessage } from "./outside.ts";
 import { createReminders } from "./reminders.ts";
 import { setTimeZone, stamp } from "./time.ts";
 import { createWorker } from "./worker.ts";
@@ -57,10 +58,12 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	});
 	const reminders = createReminders((reminder) => notifications.send({ kind: "reminder", reminder }), owner);
 	// A run the spend guard refused says why, rather than counting as the job failing.
+	const memory = createMemory(owner);
 	const jobs = createJobs({
 		deliver: (report) => notifications.send(report.paused === true ? { kind: "paused", report } : { kind: "report", report }),
 		owner,
 		explain: (reason) => (reason === "no_model" ? budget.blocked() : undefined),
+		withhold: () => [memory.extension],
 	});
 	const preamble = defineExtension({
 		name: "dreamwalker",
@@ -74,7 +77,6 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 			),
 		],
 	});
-	const memory = createMemory(owner);
 	// What a worker works with: the way out to the internet, which the main agent doesn't have (worker.ts).
 	const web = createFetch(options.fetch, owner);
 	const search = options.search === undefined ? undefined : createSearch(options.search, owner);
@@ -105,6 +107,13 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	// The conversation keeps the model it was made with; the site's setting decides it instead, so a conversation started
 	// on another model (the faux one before Claude was switched on) doesn't ask for one this server doesn't have.
 	await root.configure({ model: chosen.model }, context);
+	// The owner's messages from before they were marked are the root's plain user messages so far.
+	await root.commit(async (tx) => {
+		const marks = await tx.doc(OwnerMarks);
+		if (marks.since >= 0) return;
+		const newest = (await tx.scanEntries({ conversationId: root.id }, 1)).items[0];
+		marks.since = newest === undefined ? 0 : Number(newest.id);
+	}, context);
 	approvals = new ApprovalService(harness, { timeoutMs: options.approvalTimeoutMs });
 	// After the root exists, before anything runs: a resumed run is checked against the limits too.
 	await budget.attach(harness);
@@ -113,6 +122,10 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	/** Why a run ended unanswered, in words. A run the spend guard refused says which limit. */
 	const explain = (reason: string) => (reason === "no_model" ? (budget.blocked() ?? `no_model: ${chosen.model.provider}/${chosen.model.modelId} isn't in the model catalog`) : reason);
 
+	/** The owner's message as a submission: stamped with the time, and marked as theirs (outside.ts). */
+	const fromOwner = (message: string, by: string, requestId?: string) =>
+		({ type: "input", content: stamp(message), requestId, entry: { kind: OwnerMessage.kind, data: { by } } }) as const;
+
 	/**
 	 * Sends `message` to the root conversation, stamped with the time, and waits for the answer. `requestId` makes a retry
 	 * find the same run. A message while a question waits is its answer; one while a call waits for approval closes that
@@ -120,7 +133,7 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	 */
 	async function ask(message: string, requestId?: string, by = "cli") {
 		if ((await approvals!.intercept(root.id, message, by)) === "answered") return { ok: true as const, text: "", answered: true };
-		const submission = await root.submit({ type: "input", content: stamp(message), requestId }, context);
+		const submission = await root.submit(fromOwner(message, by, requestId), context);
 		const settled = await submission.wait(context);
 		if (settled.status !== "done" || settled.type !== "input") return { ok: false as const, reason: settled.status === "unanswered" ? explain(settled.reason) : "not an input" };
 		const answer = await root.commit((tx) => tx.entry(AssistantEntry, settled.answer), context);
@@ -130,7 +143,7 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	/** Queues `message` without waiting for the answer, for callers that can't hold a request open that long. True when it answered a question instead. */
 	async function send(message: string, requestId?: string, by = "web"): Promise<boolean> {
 		if ((await approvals!.intercept(root.id, message, by)) === "answered") return true;
-		await root.submit({ type: "input", content: stamp(message), requestId }, context);
+		await root.submit(fromOwner(message, by, requestId), context);
 		return false;
 	}
 

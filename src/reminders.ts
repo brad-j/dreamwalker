@@ -4,7 +4,7 @@
 import { Type } from "@earendil-works/pi-ai";
 import { type ConversationId, defineDoc, defineEntry, defineExtension, defineTask, defineTool, type TaskId, type Tx } from "@earendil-works/pi-durable";
 import { guard, ifOutsideText, quoted } from "./guards.ts";
-import { number, object } from "./parse.ts";
+import { number, object, string } from "./parse.ts";
 import { formatClock, formatTime } from "./time.ts";
 
 export type Reminder = { taskId: number; text: string; at: number };
@@ -146,6 +146,11 @@ export function createReminders(notify: Notify, owner = "the user") {
 	});
 
 	const guards = [
+		// A reminder's text is read back later by list_reminders as the agent's own, so setting one after outside text asks,
+		// as writing a note does: otherwise a page could leave an instruction there for a later turn.
+		guard("remind", object({ text: string }), {
+			ask: (a, situation) => ifOutsideText(situation, () => `set a reminder${quoted(a.text)}`),
+		}),
 		guard("cancel_reminder", object({ id: number }), {
 			ask: (a, situation) => ifOutsideText(situation, async () => `cancel reminder ${a.id}${quoted((await situation.snapshot(Reminders))?.items.find((r) => r.taskId === a.id)?.text)}`),
 		}),

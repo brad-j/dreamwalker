@@ -10,7 +10,7 @@
     "dev": "EXPERIMENTAL_NETLIFY_SERVER=true netlify dev",
     "check": "tsc && pnpm lint && pnpm test",
     "lint": "oxlint --deny-warnings src test netlify scripts sandbox",
-    "test": "node --no-warnings --test test/*.test.ts"
+    "test": "node --no-warnings --test --test-timeout=60000 test/*.test.ts"
   },
   "packageManager": "pnpm@12.10.1",
   "engines": {

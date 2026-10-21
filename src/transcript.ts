@@ -7,6 +7,7 @@ import { context } from "./host.ts";
 import { ApprovalSettled } from "./approvals.ts";
 import { JobReported } from "./jobs.ts";
 import { ReminderFired } from "./reminders.ts";
+import { OwnerMessage } from "./outside.ts";
 
 export type Line =
 	| { kind: "you"; id: number; at: number; text: string }
@@ -28,7 +29,8 @@ export function linesOf(entries: readonly EntryRecord[]): Line[] {
 	const calls = new Map<string, Extract<Line, { kind: "tool" }>>();
 	for (const entry of entries) {
 		const message = entry.model?.[0];
-		if (UserEntry.is(entry) && message?.role === "user") {
+		// The owner's messages: marked as theirs, or plain user messages from before they were marked.
+		if ((OwnerMessage.is(entry) || UserEntry.is(entry)) && message?.role === "user") {
 			lines.push({ kind: "you", id: entry.id, at: message.timestamp, text: unstamped(textOf(message.content)) });
 		} else if (AssistantEntry.is(entry) && message?.role === "assistant") {
 			for (const part of message.content) {
