@@ -36,6 +36,10 @@ echo "--- an upgrade, as Tailscale's control protocol makes"
 curl -sS -m 10 -o /dev/null -w '%{http_code}\n' -H "Connection: upgrade" -H "Upgrade: tailscale-control-protocol" -X POST "https://controlplane.tailscale.com/ts2021" 2>&1
 echo "--- interfaces and routes"
 ip -o addr 2>&1 | head -8; ip route 2>&1 | head -6; ip -6 route 2>&1 | head -4
+echo "--- a dummy interface, so tailscaled sees a usable address (traffic still leaves by the default route)"
+ip link show ts-online >/dev/null 2>&1 || { ip link add ts-online type dummy 2>&1 || ip tuntap add mode tun dev ts-online 2>&1; }
+ip addr add 10.213.0.1/24 dev ts-online 2>&1; ip link set ts-online up 2>&1
+ip -o addr show ts-online 2>&1 | head -2
 echo "--- tailscaled"
 mkdir -p /root/ts
 pkill tailscaled 2>/dev/null
