@@ -13,7 +13,7 @@ import { memoryStorage, startInstance } from "../../src/instance.ts";
 import { Credentials, modelFor, modelSettingsFrom } from "../../src/model.ts";
 import { ntfyAdapter, ntfySettingsFrom } from "../../src/ntfy.ts";
 import { claudeSearch } from "../../src/search.ts";
-import { CLOSED_NETWORK, probe, SandboxCredentials, sandboxFor, WORKER_NETWORK, WORKER_SANDBOX } from "../../src/sandbox.ts";
+import { CLOSED_NETWORK, clearTask, probe, SandboxCredentials, sandboxFor, WORKER_LAYOUT, WORKER_NETWORK, WORKER_SANDBOX } from "../../src/sandbox.ts";
 import { sandboxCheck } from "../../src/sandbox-check.ts";
 import { boxOf, SandboxEnv } from "../../src/sandbox-env.ts";
 import { holderFor, openDatabaseStorage } from "../../src/storage/index.ts";
@@ -58,7 +58,11 @@ const workerSandbox = {
 	root: "/root/.dreamwalker",
 	box: async () => boxOf(await sandboxFor(sandboxCredentials, platformEnv, WORKER_SANDBOX, WORKER_NETWORK)),
 };
-const workspace = () => new SandboxEnv({ ...workerSandbox, cwd: "/root/work" });
+// Each task in a directory of its own, with its own home and temporary files, all cleared when it ends.
+const workspace = {
+	env: (dir: string) => new SandboxEnv({ ...workerSandbox, cwd: `${WORKER_LAYOUT.work}/${dir}`, ownHome: true }),
+	clear: async (dir: string) => clearTask(await workerSandbox.box(), WORKER_LAYOUT, dir),
+};
 const instance = startInstance(storage, chosen, {
 	owner,
 	search,

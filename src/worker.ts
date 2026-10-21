@@ -8,6 +8,10 @@
 // conversation. The one way left for a page to reach the owner's data is through that answer: telling the main agent to
 // delegate again with the data in the task. So a delegation asks the owner, showing the whole task, when outside text
 // has come in since the owner's last message; one that follows the owner's own words doesn't.
+//
+// Workers share one computer, so each works in a directory of its own, cleared when its task ends however it ends, and
+// what else a task left is cleared once none is running (sandbox.ts): a later worker misled by a page finds nothing
+// of an earlier task's to send.
 import { Type } from "@earendil-works/pi-ai";
 import { configure, defineExtension, defineTool, type Extension, type ModelRef, section } from "@earendil-works/pi-durable";
 import { assistantText } from "./answers.ts";
@@ -24,6 +28,8 @@ export type WorkerOptions = {
 	model: ModelRef;
 	/** What a worker works with: the web, search, its computer. The worker's own instructions come first. */
 	tools: readonly Extension[];
+	/** Clears what the task in directory `dir` left on the worker's computer; absent without one. */
+	clear?: (dir: string) => Promise<void>;
 };
 
 /** The text a worker's answer reaches the main agent as: labelled as outside text and capped. */
@@ -59,20 +65,27 @@ export function createWorker(options: WorkerOptions) {
 		parameters: Type.Object({ task: Type.String({ description: "What to do and what to answer with, complete on its own" }) }),
 		replay: "safe",
 		execute: async (args, api, context) => {
+			// The worker's own directory on its computer, the same after a restart.
+			const dir = `task-${api.taskId}`;
 			// The worker's conversation is made once per call; a restart finds it by the memo.
 			let id = await api.memo<number>("dreamwalker.worker", context);
 			if (id === undefined) {
 				const created = await api.commit(async (tx) => {
 					const made = await tx.createConversation({ ownership: { kind: "task", taskId: api.taskId } });
-					await configure(tx, made.id, agent);
+					await configure(tx, made.id, { ...agent, cwd: dir });
 					return made;
 				}, context);
 				id = await api.memo<number>("dreamwalker.worker", created.id, context);
 			}
 			const worker = await api.conversation(conversationId(id), context);
 			if (worker === undefined) throw new Error(`The worker's conversation ${id} is gone`);
-			const submission = await worker.submit({ type: "input", content: stamp(args.task), requestId: `worker:${api.taskId}` }, context);
-			const settled = await submission.wait(context);
+			let settled;
+			try {
+				const submission = await worker.submit({ type: "input", content: stamp(args.task), requestId: `worker:${api.taskId}` }, context);
+				settled = await submission.wait(context);
+			} finally {
+				await options.clear?.(dir).catch((error) => console.error("[worker] couldn't clear", dir, error));
+			}
 			if (settled.status !== "done" || settled.type !== "input") {
 				return { output: [{ type: "text", text: `The worker didn't finish: ${settled.status}${settled.reason ? ` (${settled.reason})` : ""}.` }], isError: true };
 			}

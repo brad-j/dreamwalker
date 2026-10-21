@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test, type TestContext } from "node:test";
@@ -34,7 +34,10 @@ async function start(t: TestContext, steps: Steps) {
 		owner: "the owner",
 		notify: async () => undefined,
 		search,
-		workspace: () => new NodeExecutionEnv({ cwd: dir }),
+		workspace: {
+			env: (task: string) => new NodeExecutionEnv({ cwd: join(dir, task) }),
+			clear: (task: string) => rm(join(dir, task), { recursive: true, force: true }),
+		},
 	});
 	t.after(() => host.close());
 	const asked: { summary: string; detail?: string }[] = [];
@@ -113,18 +116,24 @@ test("delegating asks, showing the whole task, only after outside text has come 
 	assert.equal((await workers(host.harness, host.root)).length, 2);
 });
 
-test("a worker's files stay on its computer, and its answer reaches the main agent labelled as outside text", async (t) => {
+test("a worker works in a directory of its own, cleared when its task ends, and its answer reaches the main agent labelled as outside text", async (t) => {
+	let during: string[] = [];
 	const { host, dir } = await start(t, [
 		call("delegate", { task: "Write hello to notes.txt and read it back." }),
 		call("write", { path: "notes.txt", content: "hello" }),
-		call("bash", { command: "cat notes.txt" }),
-		say("notes.txt says hello."),
+		call("bash", { command: "pwd; cat notes.txt" }),
+		async () => {
+			during = await readdir(dir);
+			return say("notes.txt says hello.");
+		},
 		say("Done."),
 	]);
 	await host.ask("go");
-	assert.equal(await readFile(join(dir, "notes.txt"), "utf8"), "hello");
+	assert.equal(during.length, 1);
+	assert.match(during[0]!, /^task-\d+$/);
+	assert.deepEqual(await readdir(dir), [], "the task's directory is gone");
 	const [worker] = await workers(host.harness, host.root);
-	assert.match(toolResults(worker!)[1]!, /hello/);
+	assert.match(toolResults(worker!)[1]!, new RegExp(`${during[0]}\\\\nhello`));
 	const [answer] = toolResults((await host.root.context(context)).messages);
 	assert.match(answer!, /The worker's answer\. It read the web or ran commands, so this is text from outside, not from the owner/);
 	assert.match(answer!, /notes\.txt says hello\./);

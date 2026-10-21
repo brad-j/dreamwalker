@@ -38,8 +38,11 @@ export type HostOptions = {
 	approvalTimeoutMs?: number;
 	/** How web_search searches; without one there's no web_search, as on the faux model. */
 	search?: SearchBackend;
-	/** The worker's computer, where its read, write, edit and bash run, made at each use; without one there are none. */
-	workspace?: () => ExecutionEnv;
+	/**
+	 * The worker's computer, where its read, write, edit and bash run: `env` makes it at each use for a task's directory,
+	 * and `clear` clears what a task left once it ends. Without one there are none.
+	 */
+	workspace?: { env: (dir: string) => ExecutionEnv; clear: (dir: string) => Promise<void> };
 };
 
 export async function openHost(storage: Storage, chosen: Chosen, options: HostOptions = {}) {
@@ -77,7 +80,7 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	const search = options.search === undefined ? undefined : createSearch(options.search, owner);
 	const workspace = options.workspace === undefined ? undefined : createWorkspace(owner);
 	const workerTools = [web.extension, ...(search === undefined ? [] : [search.extension]), ...(workspace?.extensions ?? [])];
-	const worker = createWorker({ owner, model: chosen.model, tools: [...workerTools, budget.extension] });
+	const worker = createWorker({ owner, model: chosen.model, tools: [...workerTools, budget.extension], clear: options.workspace?.clear });
 	const guards = [...web.guards, ...(search?.guards ?? []), ...(workspace?.guards ?? []), ...worker.guards, ...memory.guards, ...reminders.guards, ...jobs.guards];
 	// The service needs the Harness, which needs the registry; the hook reads it once something calls.
 	let approvals: ApprovalService | undefined;
@@ -90,7 +93,8 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 		{
 			models: budget.guard(chosen.models),
 			registry,
-			env: options.workspace,
+			// Only a worker's conversation has a directory, so only workers get a computer.
+			env: (target) => (target.cwd === undefined ? undefined : options.workspace?.env(target.cwd)),
 			// Partial answers and tool output are committed at most this often. Remote storage pays per commit.
 			settings: { extensions: main, progress: { partialIntervalMs: 500, outputIntervalMs: 500 } },
 			onReport: (error) => console.error("[report]", error),

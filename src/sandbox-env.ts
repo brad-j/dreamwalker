@@ -140,6 +140,11 @@ export type SandboxEnvOptions = {
 	box: () => Promise<Box>;
 	/** Where the helper and Pi's environment are installed in the sandbox, and readers keep their links. */
 	root: string;
+	/**
+	 * Commands get a home and a temporary directory of their own inside `cwd` (`.home`, `.tmp`, as HOME and TMPDIR), so
+	 * the caches, histories and temporary files of what they run go where deleting `cwd` takes them.
+	 */
+	ownHome?: boolean;
 };
 
 export class SandboxEnv implements ExecutionEnv {
@@ -148,6 +153,7 @@ export class SandboxEnv implements ExecutionEnv {
 	readonly #box: () => Promise<Box>;
 	readonly #root: string;
 	readonly #dir: string;
+	readonly #ownHome: boolean;
 	readonly #running = new Set<BoxProcess>();
 	#boxed: Promise<Box> | undefined;
 
@@ -157,6 +163,12 @@ export class SandboxEnv implements ExecutionEnv {
 		this.#box = options.box;
 		this.#root = options.root;
 		this.#dir = `${options.root}/${SANDBOX_VERSION}`;
+		this.#ownHome = options.ownHome === true;
+	}
+
+	/** Where commands keep their home and temporary files: their own inside `cwd`, or the sandbox's. */
+	#homeVars(): { [name: string]: string } {
+		return this.#ownHome ? { HOME: `${this.cwd}/.home`, TMPDIR: `${this.cwd}/.tmp` } : {};
 	}
 
 	/** The box, with the helper installed in it. */
@@ -179,7 +191,7 @@ export class SandboxEnv implements ExecutionEnv {
 
 	/** Makes the working directory, and installs the helper unless it answers already. */
 	async #install(box: Box): Promise<void> {
-		const made = await box.run(["mkdir", "-p", `${this.#dir}/env`, this.cwd]);
+		const made = await box.run(["mkdir", "-p", `${this.#dir}/env`, this.cwd, ...Object.values(this.#homeVars())]);
 		if (made.exitCode !== 0) throw new Error(`Couldn't make the helper's and the working directory in the sandbox: ${made.stderr.trim()}`);
 		const ping = await box.run(["node", `${this.#dir}/helper.mjs`, this.#arg({ op: "ping" })]).catch(() => undefined);
 		if (ping !== undefined && ping.stdout.includes('"pong"')) return;
@@ -449,7 +461,7 @@ export class SandboxEnv implements ExecutionEnv {
 		let callbackError: Error | undefined;
 		let running: Following;
 		try {
-			running = await this.#follow({ op: "exec", cwd: this.cwd, command, options: { cwd: rest.cwd, env: rest.env, inheritEnv: rest.inheritEnv, timeout: rest.timeout, spill: rest.spill && { ...rest.spill }, window: rest.window && { ...rest.window } } }, (line) => {
+			running = await this.#follow({ op: "exec", cwd: this.cwd, command, options: { cwd: rest.cwd, env: { ...this.#homeVars(), ...rest.env }, inheritEnv: rest.inheritEnv, timeout: rest.timeout, spill: rest.spill && { ...rest.spill }, window: rest.window && { ...rest.window } } }, (line) => {
 				const finished = field(line, "done");
 				if (finished !== undefined) {
 					done = finished;

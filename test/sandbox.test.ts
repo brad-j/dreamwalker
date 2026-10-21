@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { createEnvConformance, type EnvConformanceCase, type EnvConformanceProvider } from "@earendil-works/pi-durable/testing";
 import { render, sandboxFiles } from "../scripts/sandbox-files.ts";
 import { context } from "../src/host.ts";
-import { CLOSED_NETWORK, WORKER_NETWORK, WORKER_SANDBOX } from "../src/sandbox.ts";
+import { clearTask, CLOSED_NETWORK, WORKER_NETWORK, WORKER_SANDBOX, type WorkerLayout } from "../src/sandbox.ts";
 import { nodeAssertions, sandboxCheck } from "../src/sandbox-check.ts";
 import { type Box, type BoxProcess, SandboxEnv } from "../src/sandbox-env.ts";
 import { SANDBOX_FILES } from "../src/sandbox-files.ts";
@@ -115,6 +115,38 @@ describe("the sandbox environment", () => {
 		const second = new SandboxEnv({ id: `local:${root}`, cwd: join(root, "two"), root, box: async () => box });
 		const ran = await second.exec("pwd", undefined, context);
 		assert.equal(ran.ok && ran.value.exitCode, 0);
+	});
+
+	test("with its own home, a command's HOME and TMPDIR are inside its working directory", async () => {
+		const box = localBox();
+		const root = join(dir, "home");
+		const env = new SandboxEnv({ id: `local:${root}`, cwd: join(root, "task-1"), root, box: async () => box, ownHome: true });
+		let printed = "";
+		const ran = await env.exec("echo $HOME $TMPDIR; ls -A", { onOutput: (text) => (printed += text) }, context);
+		assert.equal(ran.ok && ran.value.exitCode, 0);
+		assert.equal(printed, `${join(root, "task-1")}/.home ${join(root, "task-1")}/.tmp\n.home\n.tmp\n`);
+	});
+
+	test("a finished task's directory is cleared; what else tasks left goes once none is running, but not what's kept", async () => {
+		const box = localBox();
+		const base = join(dir, "clear");
+		const layout: WorkerLayout = { home: join(base, "root"), work: join(base, "root/work"), keep: [".dreamwalker", "work"], handles: join(base, "root/.dreamwalker/handles"), tmp: [join(base, "tmp")] };
+		const files = ["root/work/task-1/notes.txt", "root/work/task-2/notes.txt", "root/.bash_history", "root/.cache/x", "root/visible", "root/.dreamwalker/handles/link", "root/.dreamwalker/helper.mjs", "tmp/a"];
+		for (const file of files) {
+			await mkdir(join(base, file, ".."), { recursive: true });
+			await writeFile(join(base, file), "x");
+		}
+		const left = async (path: string) => (await readdir(join(base, path))).sort();
+		await clearTask(box, layout, "task-1");
+		assert.deepEqual(await left("root/work"), ["task-2"]);
+		assert.deepEqual(await left("root"), [".bash_history", ".cache", ".dreamwalker", "visible", "work"], "another task is running");
+		assert.deepEqual(await left("tmp"), ["a"]);
+		await clearTask(box, layout, "task-2");
+		assert.deepEqual(await left("root/work"), []);
+		assert.deepEqual(await left("root"), [".dreamwalker", "work"]);
+		assert.deepEqual(await left("root/.dreamwalker"), ["helper.mjs"]);
+		assert.deepEqual(await left("tmp"), []);
+		await assert.rejects(clearTask(box, layout, "../root"), /Not a task directory/);
 	});
 
 	test("a request too long for one argument is staged in files, which the helper removes", async () => {

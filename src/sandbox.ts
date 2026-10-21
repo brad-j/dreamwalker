@@ -7,6 +7,7 @@
 // nothing else in dreamwalker depends on it.
 import { getSandbox, type NetworkPolicy, type Sandbox } from "plinthwick";
 import { type ReadEnv, Remembered } from "./environment.ts";
+import type { Box } from "./sandbox-env.ts";
 import { object, optional, parseJson, string } from "./parse.ts";
 
 export const SANDBOX_CONTEXT = "NETLIFY_SANDBOX_CONTEXT";
@@ -49,6 +50,51 @@ export const CLOSED_NETWORK: NetworkPolicy = { egress: "deny_all" };
  * a sandbox by name, so a changed policy needs a name never used before; the probe shows what the network reaches.
  */
 export const WORKER_SANDBOX = "dreamwalker-worker";
+
+/** Where things are in the worker's sandbox. */
+export type WorkerLayout = {
+	/** The home directory, cleared of anything but `keep` once no task is running. */
+	home: string;
+	/** Each task's directory is made in here. */
+	work: string;
+	/** Names in `home` that stay: the helper's install, the server's check, `work`. */
+	keep: readonly string[];
+	/** Where the helper keeps reader links, each holding a file's contents alive until it's removed. */
+	handles: string;
+	/** Temporary directories, cleared once no task is running. */
+	tmp: readonly string[];
+};
+
+export const WORKER_LAYOUT: WorkerLayout = {
+	home: "/root",
+	work: "/root/work",
+	keep: [".dreamwalker", ".dreamwalker-check", "work"],
+	handles: "/root/.dreamwalker/handles",
+	tmp: ["/tmp", "/var/tmp"],
+};
+
+// Removes the task's directory; then, if no other task's directory is left, so no worker is mid-task, everything else a
+// task could have left: temporary files, reader links, and anything in the home directory but what's kept. The
+// directories are the count of running tasks, so it holds across restarts.
+const CLEAR = `
+work="$1"; dir="$2"; home="$3"; handles="$4"; keep="$5"; shift 5
+rm -rf "$work/$dir"
+[ -z "$(ls -A "$work" 2>/dev/null)" ] || exit 0
+for tmp in "$@"; do find "$tmp" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null; done
+rm -rf "$handles"
+for entry in "$home"/* "$home"/.[!.]* "$home"/..?*; do
+	[ -e "$entry" ] || continue
+	case " $keep " in *" \${entry##*/} "*) continue ;; esac
+	rm -rf "$entry"
+done
+`;
+
+/** Clears what the worker's task `dir` left in the sandbox (above). */
+export async function clearTask(box: Box, layout: WorkerLayout, dir: string): Promise<void> {
+	if (!/^[a-z0-9-]+$/.test(dir)) throw new Error(`Not a task directory: ${dir}`);
+	const cleared = await box.run(["sh", "-c", CLEAR, "clear", layout.work, dir, layout.home, layout.handles, layout.keep.join(" "), ...layout.tmp]);
+	if (cleared.exitCode !== 0) throw new Error(`Couldn't clear the task's files: ${cleared.stderr.trim()}`);
+}
 
 /** The sandbox called `name`, made with `network` the first time, and as it was made after that. */
 export async function sandboxFor(credentials: SandboxCredentials, read: ReadEnv, name: string, network: NetworkPolicy): Promise<Sandbox> {
