@@ -26,6 +26,9 @@ const AnswerBody = object({ id: string, text: string });
 const HostBody = object({ host: string });
 const JobBody = object({ id: number });
 
+/** The deploy a request reached, from its context. */
+export type RequestDeploy = { id: string; context: string; published: boolean };
+
 export type ApiOptions = {
 	/** The owner's token; undefined refuses every guarded route unless `local`. */
 	token: string | undefined;
@@ -42,6 +45,8 @@ export type ApiOptions = {
 	sandboxCheck?: SandboxCheck;
 	/** Deletes a sandbox and its disk, for `/api/sandbox/delete`; absent where there are no sandboxes. */
 	deleteSandbox?: (name: string) => Promise<void>;
+	/** The deploy the request being handled reached; undefined where there's no request context, as in tests. */
+	deploy?: () => RequestDeploy | undefined;
 	/** What the status route reports about the instance. */
 	describe: () => Record<string, string | number | boolean | undefined | VariableNames>;
 };
@@ -76,6 +81,12 @@ export function createApi(instance: Instance, options: ApiOptions) {
 		options.see(options.env);
 		const url = new URL(request.url);
 		if (url.pathname === "/api/health") return Response.json({ ok: true });
+		// An earlier production deploy is still reachable at its own URL, and waking it would start an instance running
+		// old code against the same database. Only the published deploy runs; previews and branch deploys aren't production.
+		const deploy = options.deploy?.();
+		if (deploy?.context === "production" && !deploy.published) {
+			return Response.json({ error: "This is an earlier production deploy. dreamwalker runs only on the published one." }, { status: 410 });
+		}
 		// Waking needs no token: the request is the point, and opening the storage resumes whatever was waiting.
 		if (url.pathname === "/api/wake") {
 			try {

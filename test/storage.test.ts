@@ -11,7 +11,7 @@ import { envFrom } from "../src/environment.ts";
 import { context, openHost } from "../src/host.ts";
 import { startInstance } from "../src/instance.ts";
 import { Credentials, modelFor } from "../src/model.ts";
-import { openDatabaseStorage } from "../src/storage/index.ts";
+import { holderFor, openDatabaseStorage } from "../src/storage/index.ts";
 import { LeaseLost } from "../src/storage/lease.ts";
 import { PostgresDatabase, toPostgres } from "../src/storage/postgres.ts";
 
@@ -163,4 +163,11 @@ test("a conversation started on one model carries on with the one the site is se
 	const second = await openHost(await openDatabaseStorage({ connectionString }), { models, model: { provider: "faux-two", modelId: "two" } });
 	assert.deepEqual(await second.ask("after"), { ok: true, text: "from the new model" });
 	await second.close();
+});
+
+test("an instance is ranked by the deploy its first request reached, each start a new holder", () => {
+	const first = holderFor("6ad8cca7064787a9e80d52a3");
+	assert.equal(first.generation, "6ad8cca7064787a9e80d52a3");
+	assert.notEqual(holderFor("6ad8cca7064787a9e80d52a3").id, first.id);
+	assert.ok(holderFor("6ad8cb11c77612b6704cade1").generation < first.generation, "an older deploy sorts first");
 });

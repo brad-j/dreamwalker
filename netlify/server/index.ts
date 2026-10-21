@@ -16,7 +16,7 @@ import { claudeSearch } from "../../src/search.ts";
 import { AGENT_SANDBOX, probe, SandboxCredentials, sandboxFor } from "../../src/sandbox.ts";
 import { sandboxCheck } from "../../src/sandbox-check.ts";
 import { boxOf, SandboxEnv } from "../../src/sandbox-env.ts";
-import { openDatabaseStorage } from "../../src/storage/index.ts";
+import { holderFor, openDatabaseStorage } from "../../src/storage/index.ts";
 
 export const config: Config = { path: "/api/*" };
 
@@ -27,7 +27,20 @@ const connectionString = () => {
 	if (url === undefined) throw new Error("NETLIFY_DB_URL hasn't been in the environment yet, at startup or in any request");
 	return url;
 };
-const storage = memory ? memoryStorage : () => openDatabaseStorage({ connectionString });
+/** The deploy the request being handled reached, as its context says, or undefined where there's no context. */
+const requestDeploy = () => {
+	try {
+		const { id, context, published } = getContext().deploy;
+		return { id, context, published };
+	} catch {
+		return undefined;
+	}
+};
+
+// The deploy this instance runs, from the first request's context, since DEPLOY_ID isn't in a Server's environment. The
+// lease ranks instances by it, and the storage only opens once a request has been seen.
+let deployId: string | undefined;
+const storage = memory ? memoryStorage : () => openDatabaseStorage({ connectionString, holder: holderFor(deployId) });
 const settings = modelSettingsFrom(process.env);
 const credentials = new Credentials();
 const sandboxCredentials = new SandboxCredentials();
@@ -54,16 +67,6 @@ const instance = startInstance(storage, chosen, {
 onShutdown(() => instance.close());
 export const shutdown = () => instance.close();
 
-/** The deploy the request being handled reached, as its context says, or undefined where there's no context. */
-const requestDeploy = () => {
-	try {
-		const { id, context, published } = getContext().deploy;
-		return { id, context, published };
-	} catch {
-		return undefined;
-	}
-};
-
 const startedAt = new Date().toISOString();
 const variablesAtStartup = platformNames();
 
@@ -72,6 +75,7 @@ export default createApi(instance, {
 	local: process.env.NETLIFY_DEV === "true",
 	env: platformEnv,
 	see: (read) => {
+		deployId ??= requestDeploy()?.id;
 		databaseUrl.see(read);
 		credentials.see(read);
 		sandboxCredentials.see(read);
@@ -81,9 +85,11 @@ export default createApi(instance, {
 	// Finding a sandbox by name makes it if there's none, so deleting one that's gone makes and deletes it.
 	deleteSandbox: async (name) => (await sandboxFor(sandboxCredentials, platformEnv, name)).delete(),
 	credentials,
+	deploy: requestDeploy,
 	describe: () => ({
 		startedAt,
 		deployId: platformEnv("DEPLOY_ID"),
+		instanceDeployId: deployId,
 		requestDeployId: requestDeploy()?.id,
 		requestDeployContext: requestDeploy()?.context,
 		requestDeployPublished: requestDeploy()?.published,

@@ -18,8 +18,9 @@ export type DatabaseStorageOptions = {
 	pollMs?: number;
 };
 
-export function holderFor(env: NodeJS.ProcessEnv): Holder {
-	return { id: randomUUID(), generation: env.DEPLOY_ID ?? "" };
+/** A new holder for this process, from the deploy it runs: the ID a request's context gave, or `DEPLOY_ID`. */
+export function holderFor(deployId: string | undefined): Holder {
+	return { id: randomUUID(), generation: deployId ?? process.env.DEPLOY_ID ?? "" };
 }
 
 /**
@@ -27,7 +28,7 @@ export function holderFor(env: NodeJS.ProcessEnv): Holder {
  * while nothing commits; closing the storage gives it up.
  */
 export async function openDatabaseStorage(options: DatabaseStorageOptions): Promise<Storage> {
-	const holder = options.holder ?? holderFor(process.env);
+	const holder = options.holder ?? holderFor(undefined);
 	const database = new PostgresDatabase({ connectionString: options.connectionString, beforeClose: (executor) => releaseLease(executor, holder) });
 	const deadline = Date.now() + (options.waitMs ?? (LEASE_SECONDS + 5) * 1000);
 	while (true) {

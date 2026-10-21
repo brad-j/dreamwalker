@@ -17,7 +17,8 @@ export type Holder = {
 	id: string;
 	/**
 	 * The deploy this process runs, compared as text: Netlify's deploy IDs start with their creation time in hex, so a
-	 * newer deploy sorts after an older one. Empty when there's no deploy, as under `netlify dev`.
+	 * newer deploy sorts after an older one. A Netlify Server has no `DEPLOY_ID` in its environment, so it's the ID the
+	 * first request's context gave. Empty when there's no deploy, as under `netlify dev`.
 	 */
 	generation: string;
 };

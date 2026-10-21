@@ -57,6 +57,16 @@ test("health and wake need no token", async () => {
 	assert.deepEqual(await (await api(new Request("http://dreamwalker.test/api/wake"))).json(), { awake: true });
 });
 
+test("an earlier production deploy refuses everything but health, waking included; the published one and previews run", async () => {
+	const at = (deploy: ApiOptions["deploy"]) => createApi(instance, options({ deploy }));
+	const old = at(() => ({ id: "0001", context: "production", published: false }));
+	assert.equal((await old(new Request("http://dreamwalker.test/api/health"))).status, 200);
+	for (const path of ["/api/wake", "/api/status", "/api/approvals"]) assert.equal((await old(new Request(`http://dreamwalker.test${path}`, { headers: owner }))).status, 410, path);
+	for (const deploy of [{ id: "0002", context: "production", published: true }, { id: "0003", context: "deploy-preview", published: false }]) {
+		assert.deepEqual(await (await at(() => deploy)(new Request("http://dreamwalker.test/api/wake"))).json(), { awake: true }, deploy.context);
+	}
+});
+
 test("status describes the instance and the model's credentials, never the key", async () => {
 	const credentials = new Credentials();
 	const env = { ANTHROPIC_API_KEY: "secret-gateway-key", ANTHROPIC_BASE_URL: "https://gateway.example.com/anthropic" };
