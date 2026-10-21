@@ -435,7 +435,7 @@ export function createJobs(options: {
 	const schedule = defineTool({
 		name: "schedule_job",
 		description:
-			`Schedule something for dreamwalker to do later and report to ${owner}: a briefing, a regular check, or a follow-up you ` +
+			`Schedule something for you to do later and report to ${owner}: a briefing, a regular check, or a follow-up you ` +
 			`promised. Give exactly one of: \`at\` (once, ISO 8601 with a UTC offset), \`every\` (repeating, at least ${MIN_EVERY_MINUTES / 60}h apart, like 6h or 1d), ` +
 			`or \`time\` (HH:MM in ${owner}'s time zone) with \`days\` (daily, weekdays, weekends, or a list like "mon, thu"). ` +
 			`Mode "watch" reports only when something needs ${owner}'s attention. Each run starts fresh, without this conversation, ` +

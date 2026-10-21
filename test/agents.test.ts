@@ -96,12 +96,42 @@ test("an agent sees the shared notes and its own work notes, writes work notes u
 		[2, "Tomatoes are in bed 2.", "sage"],
 		[3, "The owner likes heirloom tomatoes.", undefined],
 	]);
-	assert.match(prompt, /shared by all of the owner's agents[^]*\[n1\] The owner lives in a cold climate\.[^]*Your own work notes, which only you see:\\n\[n2\] Tomatoes are in bed 2\./);
+	assert.match(prompt, /shared with all of the owner's agents \(remember with shared: true adds one\):\\n\[n1\] The owner lives in a cold climate\.[^]*Your own work notes, which only you see \(remember puts notes here unless shared is true\):\\n\[n2\] Tomatoes are in bed 2\./);
 	await post("/api/ask", { message: "forget n2" });
 	assert.deepEqual(asked, []);
 	assert.match(rootPrompt, /\[n3\] The owner likes heirloom tomatoes\./);
 	assert.doesNotMatch(rootPrompt, /bed 2/);
 	assert.equal((await host.harness.snapshot(Memory, context))!.notes.length, 3, "dreamwalker can't forget sage's work note");
+});
+
+test("dreamwalker's notes are shared unless it keeps one as its own work note, which no other agent sees", async (t) => {
+	let rootPrompt = "";
+	let sagePrompt = "";
+	const { host, post, sage } = await start(t, [
+		call("remember", { text: "The owner takes coffee black." }),
+		call("remember", { text: "The frost-check site moved to frost.example.", shared: false } as never),
+		(ctx) => {
+			rootPrompt = system(ctx);
+			return say("Noted.");
+		},
+		(ctx) => {
+			sagePrompt = system(ctx);
+			return say("Hi.");
+		},
+	]);
+	await sage();
+	await post("/api/ask", { message: "I take my coffee black; also the frost site moved" });
+	await post("/api/ask", { message: "hello", agent: "sage" });
+	assert.deepEqual(
+		(await host.harness.snapshot(Memory, context))!.notes.map((n) => [n.text, n.agent]),
+		[
+			["The owner takes coffee black.", undefined],
+			["The frost-check site moved to frost.example.", "dreamwalker"],
+		],
+	);
+	assert.match(rootPrompt, /\(remember puts notes here unless shared is false\):\\n\[n1\] The owner takes coffee black\.[^]*Your own work notes, which only you see \(remember with shared: false adds one\):\\n\[n2\] The frost-check site moved/);
+	assert.match(sagePrompt, /coffee black/);
+	assert.doesNotMatch(sagePrompt, /frost\.example/);
 });
 
 test("an agent without the shared notes doesn't see them and can't write one", async (t) => {
