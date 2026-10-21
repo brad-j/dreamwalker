@@ -37,7 +37,7 @@
 | bubblewrap, a sandbox directory per agent | A Netlify Sandbox per agent, behind Pi Durable's `ExecutionEnv` |
 | CLI over a Unix socket | The HTTP API, with the owner's token |
 | The app behind Tailscale | Netlify Identity or the owner's token; routes that ntfy and voice call check their own secret |
-| Slack over Socket Mode | Works while awake; the Events API later, which wakes the server itself |
+| Slack over Socket Mode | None: the web app instead |
 | Skills repo, connector vault, browser profiles on disk | Blobs or Database |
 | Workspaces and the homelab over SSH and Tailscale | Not for now |
 | Chromium and poppler on the VM | Not for now; later inside a Sandbox |
@@ -68,4 +68,4 @@
 
 ## Next
 
-1. From gaidin: Slack, since the split is in, as it brings in other people's text; agents the owner names and spawns, each with what it may see and do; then redaction and rules.
+1. Agents the owner names and spawns, each with what it may see and do; then redaction and rules, from gaidin. No Slack: dreamwalker is reached through its web app.
