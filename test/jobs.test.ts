@@ -117,7 +117,7 @@ test("a job asks first, runs in its own conversation, reports, and is recorded w
 	await until(async () => ((await host.harness.snapshot(Jobs, context))?.items.length === 0 ? true : undefined));
 	const runTools = (await (await host.harness.conversation(conversationId(report!.conversationId), context))!.agent(context)).tools.map((tool) => tool.name);
 	assert.ok(!runTools.includes("schedule_job"));
-	assert.ok(runTools.includes("fetch_url"));
+	assert.ok(runTools.includes("delegate") && !runTools.includes("fetch_url"), "a run hands web work to a worker like the main agent");
 });
 
 test("a watch with nothing to report stays quiet, and its runs see its earlier reports and the quiet runs since", async (t) => {
@@ -198,7 +198,7 @@ test("a job that runs too often or has no room is refused before asking", async 
 
 test("every new job asks, showing the whole instruction, and cancelling asks after outside text", async () => {
 	const { guards } = createJobs({ deliver: async () => undefined, owner: "the owner" });
-	const situation = (outside: string[]): Situation => ({ fetchHosts: [], conversationId: 1, callId: "c1", outside: async () => outside, searched: async () => [], snapshot: async () => ({ items: [{ taskId: 7, title: "Backups" }] }) as never });
+	const situation = (outside: string[]): Situation => ({ conversationId: 1, callId: "c1", outside: async () => outside, outsideThisTurn: async () => [], snapshot: async () => ({ items: [{ taskId: 7, title: "Backups" }] }) as never });
 	const schedule = guards.find((g) => g.tool === "schedule_job")!;
 	const long = "y".repeat(2000);
 	const asked = await schedule.ask({ title: "Briefing", instruction: long, time: "08:00", days: "weekdays", mode: "watch" }, situation([]));

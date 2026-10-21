@@ -12,7 +12,8 @@
 //
 // gaidin's gates, agents and hand-offs aren't here; without gates, a job repeats at most every 6 hours.
 import { Type } from "@earendil-works/pi-ai";
-import { AssistantEntry, configure, type ConversationId, defineDoc, defineEntry, defineExtension, defineTask, defineTool, type EntryRecord, type Extension, type TaskId, type Tx } from "@earendil-works/pi-durable";
+import { configure, type ConversationId, defineDoc, defineEntry, defineExtension, defineTask, defineTool, type Extension, type TaskId, type Tx } from "@earendil-works/pi-durable";
+import { assistantText } from "./answers.ts";
 import { clip, guard, ifOutsideText, quoted } from "./guards.ts";
 import { conversationId as toConversationId } from "./ids.ts";
 import { number, object, optional, string } from "./parse.ts";
@@ -206,13 +207,6 @@ type Result = "done" | "cancelled";
 
 const MAX_DELIVERY_ATTEMPTS = 5;
 
-function answerText(entry: EntryRecord | undefined): string | undefined {
-	if (!AssistantEntry.is(entry)) return undefined;
-	const message = entry.model?.[0];
-	if (message?.role !== "assistant") return undefined;
-	return message.content.flatMap((c) => (c.type === "text" && c.text ? [c.text] : [])).join("") || undefined;
-}
-
 /** Keeps a delivered report in the job's history: the last few, each cut short. */
 export function recordReport(job: Job, at: number, text: string) {
 	const kept = text.length > REPORT_CHARS ? `${text.slice(0, REPORT_CHARS)}…` : text;
@@ -352,7 +346,7 @@ export function createJobs(options: { deliver: Deliver; owner: string; explain?:
 					let failure: Failure | undefined;
 					if (settled.status === "done" && settled.type === "input") {
 						answer = settled.answer;
-						text = answerText(await tx.entry(settled.answer)) ?? "(the run gave no text)";
+						text = assistantText(await tx.entry(settled.answer)) ?? "(the run gave no text)";
 					} else {
 						const why = options.explain?.(settled.reason);
 						text = why === undefined ? `The run didn't finish (${settled.status}${settled.reason ? `: ${settled.reason}` : ""}).` : `The run didn't happen. ${why}`;

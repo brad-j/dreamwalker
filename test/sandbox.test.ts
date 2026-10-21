@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { createEnvConformance, type EnvConformanceCase, type EnvConformanceProvider } from "@earendil-works/pi-durable/testing";
 import { render, sandboxFiles } from "../scripts/sandbox-files.ts";
 import { context } from "../src/host.ts";
-import { AGENT_NETWORK } from "../src/sandbox.ts";
+import { CLOSED_NETWORK, WORKER_NETWORK, WORKER_SANDBOX } from "../src/sandbox.ts";
 import { nodeAssertions, sandboxCheck } from "../src/sandbox-check.ts";
 import { type Box, type BoxProcess, SandboxEnv } from "../src/sandbox-env.ts";
 import { SANDBOX_FILES } from "../src/sandbox-files.ts";
@@ -63,8 +63,9 @@ before(async () => {
 });
 after(() => rm(dir, { recursive: true, force: true }));
 
-test("the agent's sandbox reaches no network, since the agent holds the owner's notes and conversation", () => {
-	assert.deepEqual(AGENT_NETWORK, { egress: "deny_all" });
+test("only the worker's sandbox reaches the internet; any other the probe makes is closed", () => {
+	assert.deepEqual(CLOSED_NETWORK, { egress: "deny_all" });
+	assert.deepEqual([WORKER_SANDBOX, WORKER_NETWORK], ["dreamwalker-worker", { egress: "allow_all" }]);
 });
 
 describe("the sandbox's files", () => {

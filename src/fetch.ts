@@ -1,13 +1,11 @@
-// fetch_url, from gaidin: reads a web page or API for the model. This is how dreamwalker reaches the internet, and
-// only the internet: every address a name resolves to is checked
-// when the connection is made, after each redirect too, and private, LAN, tailnet, loopback and other
-// special ranges are refused. GET only, no cookies or credentials, size-capped.
+// fetch_url, from gaidin: reads a web page or API for the model. Every address a name resolves to is checked when the
+// connection is made, after each redirect too, and private, LAN, tailnet, loopback and other special ranges are
+// refused, so it reaches the internet and only the internet. GET only, no cookies or credentials, size-capped.
 //
-// What comes back is someone else's text, so it's labelled as such. A URL can still carry data out in
-// its path or query; asking the owner about a new host (`fetchGuard`) is where that gets a check. So a redirect is followed only on the
-// same host: one to another host comes back as `redirect`, and the next fetch of it is checked like any other. A URL that
-// web_search returned in the same conversation doesn't ask, since the model didn't write it; a link from a page still does,
-// because a page can offer many links and tell the model which to pick.
+// Only the worker has it (worker.ts), which holds none of the owner's notes or conversation, so it doesn't ask before
+// fetching, whatever the host: a page that tells the worker to send something out finds nothing of the owner's to send.
+// What comes back is someone else's text, so it's labelled as such and counts as outside text. A redirect is followed
+// only on the same host: one to another host comes back as `redirect`, and the next fetch of it is checked like any other.
 import { lookup as dnsLookup } from "node:dns";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -252,22 +250,7 @@ export function createFetch(options: FetchOptions = {}, owner = "the user") {
 			return { output: [{ type: "text", text: render(fetched, args.maxChars ?? 20_000, owner) }], isError: fetched.status >= 400 };
 		},
 	});
-	// A host the owner hasn't allowed for good asks, offering to allow it, unless web_search returned the exact URL.
 	// A page is text from outside.
-	const fetchGuard = guard("fetch_url", object({ url: string }), {
-		ask: async (a, situation) => {
-			let url: URL;
-			try {
-				url = new URL(a.url);
-			} catch {
-				return undefined; // the tool reports the bad URL itself
-			}
-			const host = url.hostname;
-			if (situation.fetchHosts.includes(host)) return undefined;
-			if ((await situation.searched()).some((found) => URL.parse(found)?.href === url.href)) return undefined;
-			return { summary: `fetch ${a.url}`, always: { kind: "fetch-host", value: host, label: `Always allow ${host}`, done: `Always allowed ${host}` } };
-		},
-		outside: true,
-	});
+	const fetchGuard = guard("fetch_url", object({ url: string }), { outside: true });
 	return { tool: fetchUrl, guards: [fetchGuard], extension: defineExtension({ name: "web", tools: [fetchUrl] }) };
 }

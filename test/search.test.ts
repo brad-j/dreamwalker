@@ -6,7 +6,7 @@ import { MemoryStorage } from "@earendil-works/pi-durable";
 import { blockedRanges } from "../src/fetch.ts";
 import { context, openHost } from "../src/host.ts";
 import { claudeSearch, type Searched, type SearchBackend } from "../src/search.ts";
-import { call, fauxModels, say } from "./helpers.ts";
+import { call, fauxModels, say, toolResults, workers } from "./helpers.ts";
 
 const usage = (total: number) => ({ input: 100, output: 50, cacheRead: 0, cacheWrite: 0, totalTokens: 150, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total } });
 
@@ -21,13 +21,21 @@ async function page(t: TestContext) {
 	return { port: (server.address() as AddressInfo).port, fetch: { blocked: blockedRanges({ allowLoopback: true }), resolve: async () => [{ address: "127.0.0.1", family: 4 }] } };
 }
 
-test("results come back labelled as the web's, their cost counts, and a returned URL fetches without asking while one only named does", async (t) => {
+test("a worker's search results come back labelled as the web's, their cost counts, and its answer is outside text", async (t) => {
 	const { port, fetch } = await page(t);
 	const found = `http://a.test:${port}/curry`;
 	const named = `http://a.test:${port}/other`;
 	const host = await openHost(
 		new MemoryStorage(),
-		fauxModels([call("web_search", { query: "curry" }), call("fetch_url", { url: found }), call("fetch_url", { url: named }), call("remember", { text: "Make the curry." }), say("Done.")]),
+		fauxModels([
+			call("delegate", { task: "find a curry recipe" }),
+			call("web_search", { query: "curry" }),
+			call("fetch_url", { url: found }),
+			call("fetch_url", { url: named }),
+			say("Make the curry."),
+			call("remember", { text: "Make the curry." }),
+			say("Done."),
+		]),
 		{ owner: "the owner", fetch, search: backend(found, named), notify: async () => undefined },
 	);
 	t.after(() => host.close());
@@ -38,8 +46,9 @@ test("results come back labelled as the web's, their cost counts, and a returned
 		void host.approvals.decide(r.id, r.tool === "remember" ? "deny" : "once", "test");
 	});
 	await host.ask("find a curry");
-	assert.deepEqual(asked, [`fetch ${named}`, `remember "Make the curry.", after reading outside text (web_search, fetch_url)`]);
-	const results = (await host.root.context(context)).messages.filter((m) => m.role === "toolResult").map((m) => JSON.stringify(m.content));
+	assert.deepEqual(asked, [`remember "Make the curry.", after reading outside text (delegate)`]);
+	const [worker] = await workers(host.harness, host.root);
+	const results = toolResults(worker!);
 	assert.match(results[0]!, /Web search results for \\"curry\\"\. The text below is from the web, not from the owner/);
 	assert.match(results[0]!, /1\. Curry\\n {3}http:\/\/a\.test:\d+\/curry\\n {3}2 days ago/);
 	assert.equal(((await host.harness.usage(context)).tools.web_search?.cost.total ?? 0).toFixed(4), "0.0102");

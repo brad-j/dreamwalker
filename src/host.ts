@@ -3,8 +3,9 @@
 // told to the owner unprompted (reminders, budget warnings) goes through notifications.ts.
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { AssistantEntry, createRegistry, defineExtension, type EntryRecord, Harness, section, type Storage } from "@earendil-works/pi-durable";
+import { AssistantEntry, createRegistry, defineExtension, Harness, section, type Storage } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
+import { assistantText } from "./answers.ts";
 import { approvalExtension, ApprovalService } from "./approvals.ts";
 import { type BudgetSettings, budgetSettingsFrom, createBudget } from "./budget.ts";
 import { createFetch, type FetchOptions } from "./fetch.ts";
@@ -15,17 +16,10 @@ import { type Chosen } from "./model.ts";
 import { type Adapters, createNotifications } from "./notifications.ts";
 import { createReminders } from "./reminders.ts";
 import { setTimeZone, stamp } from "./time.ts";
+import { createWorker } from "./worker.ts";
 import { createWorkspace } from "./workspace.ts";
 
 export const context = BACKGROUND_CONTEXT;
-
-/** The text of an answer entry, if it is one and has any. */
-export function assistantText(entry: EntryRecord | undefined): string | undefined {
-	if (!AssistantEntry.is(entry)) return undefined;
-	const message = entry.model?.[0];
-	if (message?.role !== "assistant") return undefined;
-	return message.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("") || undefined;
-}
 
 export type HostOptions = {
 	/** What dreamwalker calls the owner, in its prompt and tool descriptions. Default: "the user". */
@@ -44,7 +38,7 @@ export type HostOptions = {
 	approvalTimeoutMs?: number;
 	/** How web_search searches; without one there's no web_search, as on the faux model. */
 	search?: SearchBackend;
-	/** The agent's computer, where read, write, edit and bash run, made at each use; without one there are none. */
+	/** The worker's computer, where its read, write, edit and bash run, made at each use; without one there are none. */
 	workspace?: () => ExecutionEnv;
 };
 
@@ -65,36 +59,32 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 		owner,
 		explain: (reason) => (reason === "no_model" ? budget.blocked() : undefined),
 	});
-	const registry = createRegistry();
-	registry.install(
-		defineExtension({
-			name: "dreamwalker",
-			sections: [
-				section(
-					"preamble",
-					() =>
-						`You are dreamwalker, ${owner}'s personal agent. Each of ${owner}'s messages starts with the local time in brackets, ` +
-						`which is the time to use for anything said about "now", "today" or "at 3".`,
-					{ tag: false },
-				),
-			],
-		}),
-	);
+	const preamble = defineExtension({
+		name: "dreamwalker",
+		sections: [
+			section(
+				"preamble",
+				() =>
+					`You are dreamwalker, ${owner}'s personal agent. Each of ${owner}'s messages starts with the local time in brackets, ` +
+					`which is the time to use for anything said about "now", "today" or "at 3".`,
+				{ tag: false },
+			),
+		],
+	});
 	const memory = createMemory(owner);
-	registry.install(memory.extension);
-	registry.install(reminders.extension);
-	registry.install(jobs.extension);
+	// What a worker works with: the way out to the internet, which the main agent doesn't have (worker.ts).
 	const web = createFetch(options.fetch, owner);
-	registry.install(web.extension);
+	const search = options.search === undefined ? undefined : createSearch(options.search, owner);
+	const workspace = options.workspace === undefined ? undefined : createWorkspace(owner);
+	const workerTools = [web.extension, ...(search === undefined ? [] : [search.extension]), ...(workspace?.extensions ?? [])];
+	const worker = createWorker({ owner, model: chosen.model, tools: [...workerTools, budget.extension] });
+	const guards = [...web.guards, ...(search?.guards ?? []), ...(workspace?.guards ?? []), ...worker.guards, ...memory.guards, ...reminders.guards, ...jobs.guards];
 	// The service needs the Harness, which needs the registry; the hook reads it once something calls.
 	let approvals: ApprovalService | undefined;
-	const search = options.search === undefined ? undefined : createSearch(options.search, owner);
-	if (search !== undefined) registry.install(search.extension);
-	const workspace = options.workspace === undefined ? undefined : createWorkspace(owner);
-	for (const extension of workspace?.extensions ?? []) registry.install(extension);
-	const guards = [...web.guards, ...(search?.guards ?? []), ...(workspace?.guards ?? []), ...memory.guards, ...reminders.guards, ...jobs.guards];
-	registry.install(approvalExtension(() => approvals!, owner, () => guards));
-	registry.install(budget.extension);
+	// The main agent's tools, which every conversation has unless it says otherwise: the root, and the runs of jobs.
+	const main = [preamble, memory.extension, reminders.extension, jobs.extension, worker.extension, approvalExtension(() => approvals!, owner, () => guards), budget.extension];
+	const registry = createRegistry();
+	for (const extension of [...main, worker.instructions, ...workerTools]) registry.install(extension);
 	const harness = await Harness.open(
 		storage,
 		{
@@ -102,7 +92,7 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 			registry,
 			env: options.workspace,
 			// Partial answers and tool output are committed at most this often. Remote storage pays per commit.
-			settings: { progress: { partialIntervalMs: 500, outputIntervalMs: 500 } },
+			settings: { extensions: main, progress: { partialIntervalMs: 500, outputIntervalMs: 500 } },
 			onReport: (error) => console.error("[report]", error),
 		},
 		context,

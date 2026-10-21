@@ -3,12 +3,12 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import test, { type TestContext } from "node:test";
 import { createGzip, gzipSync } from "node:zlib";
-import { createModels } from "@earendil-works/pi-ai/models";
-import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { Situation } from "../src/guards.ts";
 import { blockedRanges, createFetch, fetchPublic, type FetchOptions, htmlToText, render } from "../src/fetch.ts";
 import { MemoryStorage } from "@earendil-works/pi-durable";
 import { context, openHost } from "../src/host.ts";
+import { call, fauxModels, say, workers } from "./helpers.ts";
 
 const PAGE = `<html><head><title>Fish &amp; Chips</title><script>alert("x")</script></head>
 <body><nav>Home | About</nav><main><h1>Recipe</h1><p>Batter &mdash; light.</p>
@@ -112,7 +112,7 @@ test("IPv6 forms that carry an IPv4 address are refused: IPv4-compatible (::/96)
 	assert.ok(!blocked.check("2606:4700:4700::1111", "ipv6"), "a public IPv6 address");
 });
 
-test("a redirect is followed on its host only; one to another host comes back unfollowed, so fetching it is asked about like any other", async (t) => {
+test("a redirect is followed on its host only; one to another host comes back unfollowed, so fetching it is checked like any other", async (t) => {
 	const { base, options } = await setup(t);
 	const port = new URL(base).port;
 	// other.test resolves to nothing, so connecting to it would fail.
@@ -170,48 +170,40 @@ test("htmlToText keeps the whole page when it marks no main content", () => {
 	assert.equal(text, "Only & this!");
 });
 
-test("the agent can call fetch_url, and an error status is an error result", async (t) => {
+test("a worker can call fetch_url without asking, and an error status is an error result", async (t) => {
 	const { base, options } = await setup(t);
-	const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1" }] });
-	faux.setResponses([
-		fauxAssistantMessage([fauxToolCall("fetch_url", { url: `${base}/page` }), fauxToolCall("fetch_url", { url: `${base}/missing` })], { stopReason: "toolUse" }),
-		fauxAssistantMessage(fauxText("Read it.")),
-	]);
-	const models = createModels();
-	models.setProvider(faux.provider);
-	const host = await openHost(new MemoryStorage(), { models, model: { provider: "faux", modelId: "faux-1" } }, { fetch: options, notify: async () => undefined });
+	const host = await openHost(
+		new MemoryStorage(),
+		fauxModels([
+			call("delegate", { task: "read the recipe" }),
+			fauxAssistantMessage([fauxToolCall("fetch_url", { url: `${base}/page` }), fauxToolCall("fetch_url", { url: `${base}/missing` })], { stopReason: "toolUse" }),
+			say("Read it."),
+			say("Done."),
+		]),
+		{ fetch: options, notify: async () => undefined },
+	);
 	t.after(() => host.close());
-	// New hosts need approval (test/approvals.test.ts); say yes to each.
-	host.approvals.onChange((r) => void (r.status === "pending" && host.approvals.decide(r.id, "once", "test")));
+	const asked: string[] = [];
+	host.approvals.onChange((r) => void (r.status === "pending" && asked.push(r.summary)));
 	assert.equal((await (await host.root.submit({ type: "input", content: "read the recipe" }, context)).wait(context)).status, "done");
-	const results = (await host.root.context(context)).messages.filter((m) => m.role === "toolResult");
+	const [worker] = await workers(host.harness, host.root);
+	const results = worker!.filter((m) => m.role === "toolResult");
 	assert.match(JSON.stringify(results[0]), /Batter - light/);
 	assert.equal((results[1] as { isError?: boolean }).isError, true);
+	assert.deepEqual(asked, []);
 });
 
 test("htmlToText leaves an entity it doesn't know as it is, even one named like an object's property", () => {
 	assert.equal(htmlToText("<p>&constructor; &toString; &bogus; &AMP;</p>", "https://example.com/"), "&constructor; &toString; &bogus; &");
 });
 
-test("a fetch asks unless its host is allowed for good, offers to allow the host, and what it returns is outside text", async () => {
+test("a fetch doesn't ask, whatever its host, and what it returns is outside text", async () => {
 	const [guard] = createFetch().guards;
-	const ask = (url: unknown, fetchHosts: string[] = [], searched: string[] = []) => {
-		const situation: Situation = { fetchHosts, conversationId: 1, callId: "c1", outside: async () => [], searched: async () => searched, snapshot: async () => undefined };
+	const ask = (url: unknown) => {
+		const situation: Situation = { conversationId: 1, callId: "c1", outside: async () => ["fetch_url"], outsideThisTurn: async () => [], snapshot: async () => undefined };
 		return guard!.ask({ url } as never, situation);
 	};
 	assert.equal(guard!.tool, "fetch_url");
 	assert.equal(guard!.outside, true);
-	assert.deepEqual(await ask("https://a.example/page"), {
-		summary: "fetch https://a.example/page",
-		always: { kind: "fetch-host", value: "a.example", label: "Always allow a.example", done: "Always allowed a.example" },
-	});
-	assert.equal(await ask("https://a.example/other", ["a.example"]), undefined);
-	// A URL web_search returned doesn't ask, written the same way or not; another path on its host, or a query added, does.
-	const searched = ["https://a.example/recipes/curry", "not a url"];
-	assert.equal(await ask("https://a.example/recipes/curry", [], searched), undefined);
-	assert.equal(await ask("https://A.example:443/recipes/curry", [], searched), undefined);
-	assert.equal((await ask("https://a.example/recipes/curry?q=notes", [], searched))?.summary, "fetch https://a.example/recipes/curry?q=notes");
-	assert.equal((await ask("https://a.example/recipes/other", [], searched))?.summary, "fetch https://a.example/recipes/other");
-	// The tool reports a bad URL itself.
-	assert.equal(await ask("not a url"), undefined);
+	for (const url of ["https://a.example/page", "https://b.example/?q=notes", "not a url"]) assert.equal(await ask(url), undefined, url);
 });

@@ -13,7 +13,7 @@ import { memoryStorage, startInstance } from "../../src/instance.ts";
 import { Credentials, modelFor, modelSettingsFrom } from "../../src/model.ts";
 import { ntfyAdapter, ntfySettingsFrom } from "../../src/ntfy.ts";
 import { claudeSearch } from "../../src/search.ts";
-import { AGENT_SANDBOX, probe, SandboxCredentials, sandboxFor } from "../../src/sandbox.ts";
+import { CLOSED_NETWORK, probe, SandboxCredentials, sandboxFor, WORKER_NETWORK, WORKER_SANDBOX } from "../../src/sandbox.ts";
 import { sandboxCheck } from "../../src/sandbox-check.ts";
 import { boxOf, SandboxEnv } from "../../src/sandbox-env.ts";
 import { holderFor, openDatabaseStorage } from "../../src/storage/index.ts";
@@ -51,9 +51,14 @@ const chosen = modelFor(settings, credentials);
 // Search runs on Claude too, through the same credentials; there's none on the faux model.
 const search =
 	settings.provider === "faux" ? undefined : claudeSearch(() => credentials.current(platformEnv), settings.id, chosen.models.getModel("anthropic", settings.id)?.cost);
-// The agent's computer is a Netlify Sandbox, reached with the credentials the newest request showed.
-const agentSandbox = { id: `sandbox:${AGENT_SANDBOX}`, root: "/root/.dreamwalker", box: async () => boxOf(await sandboxFor(sandboxCredentials, platformEnv, AGENT_SANDBOX)) };
-const workspace = () => new SandboxEnv({ ...agentSandbox, cwd: "/root/work" });
+// The worker's computer is a Netlify Sandbox, reached with the credentials the newest request showed.
+const networkFor = (name: string) => (name === WORKER_SANDBOX ? WORKER_NETWORK : CLOSED_NETWORK);
+const workerSandbox = {
+	id: `sandbox:${WORKER_SANDBOX}`,
+	root: "/root/.dreamwalker",
+	box: async () => boxOf(await sandboxFor(sandboxCredentials, platformEnv, WORKER_SANDBOX, WORKER_NETWORK)),
+};
+const workspace = () => new SandboxEnv({ ...workerSandbox, cwd: "/root/work" });
 const instance = startInstance(storage, chosen, {
 	owner,
 	search,
@@ -79,10 +84,10 @@ export default createApi(instance, {
 		credentials.see(read);
 		sandboxCredentials.see(read);
 	},
-	probe: async (name) => probe(await sandboxFor(sandboxCredentials, platformEnv, name)),
-	sandboxCheck: sandboxCheck({ ...agentSandbox, scratch: "/root/.dreamwalker-check" }),
+	probe: async (name) => probe(await sandboxFor(sandboxCredentials, platformEnv, name, networkFor(name))),
+	sandboxCheck: sandboxCheck({ ...workerSandbox, scratch: "/root/.dreamwalker-check" }),
 	// Finding a sandbox by name makes it if there's none, so deleting one that's gone makes and deletes it.
-	deleteSandbox: async (name) => (await sandboxFor(sandboxCredentials, platformEnv, name)).delete(),
+	deleteSandbox: async (name) => (await sandboxFor(sandboxCredentials, platformEnv, name, networkFor(name))).delete(),
 	credentials,
 	deploy: requestDeploy,
 	describe: () => ({

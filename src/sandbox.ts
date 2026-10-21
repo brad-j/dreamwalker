@@ -35,22 +35,23 @@ export class SandboxCredentials {
 }
 
 /**
- * What the agent's sandbox may reach: nothing. The agent holds the owner's notes and conversation in its context, so
- * a sandbox that reached the internet would let a page with hidden instructions have it send them anywhere, with no
- * secret in the sandbox needed: the model carries them. An allowlist doesn't close that either, since a page can hand
- * over its own token for GitHub or npm to push to. The internet is reached only through fetch_url, which asks about
- * hosts the owner hasn't allowed.
- *
- * A sandbox keeps the policy it was made with, and the SDK doesn't compare policies when it finds a sandbox by name,
- * so a changed policy needs a new name; the probe shows whether the network is reachable.
+ * The worker's sandbox reaches the open internet. The worker holds none of the owner's notes or conversation, only its
+ * task (worker.ts), so a page that tells it to send something out finds nothing of the owner's to send, and no secret
+ * of the server's is in the sandbox. The main agent has no sandbox at all.
  */
-export const AGENT_NETWORK: NetworkPolicy = { egress: "deny_all" };
+export const WORKER_NETWORK: NetworkPolicy = { egress: "allow_all" };
 
-/** The agent's sandbox. Never a name used before with another network policy (above). */
-export const AGENT_SANDBOX = "dreamwalker-workspace";
+/** Any other sandbox, as the probe makes one: no network. */
+export const CLOSED_NETWORK: NetworkPolicy = { egress: "deny_all" };
 
-/** The sandbox called `name`, made with `network` the first time. */
-export async function sandboxFor(credentials: SandboxCredentials, read: ReadEnv, name: string, network: NetworkPolicy = AGENT_NETWORK): Promise<Sandbox> {
+/**
+ * The worker's sandbox. A sandbox keeps the policy it was made with, and the SDK doesn't compare policies when it finds
+ * a sandbox by name, so a changed policy needs a name never used before; the probe shows what the network reaches.
+ */
+export const WORKER_SANDBOX = "dreamwalker-worker";
+
+/** The sandbox called `name`, made with `network` the first time, and as it was made after that. */
+export async function sandboxFor(credentials: SandboxCredentials, read: ReadEnv, name: string, network: NetworkPolicy): Promise<Sandbox> {
 	const seen = credentials.current(read);
 	if (seen === undefined) throw new Error("No sandbox credentials have been seen yet: Netlify Sandboxes may not be on for this site.");
 	return getSandbox(name, { ...seen, network });

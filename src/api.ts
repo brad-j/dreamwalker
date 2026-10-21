@@ -21,9 +21,8 @@ const AddNoteBody = object({ text: string });
 const UpdateNoteBody = object({ id: noteId, text: string });
 const ForgetNoteBody = object({ id: noteId });
 const CancelReminderBody = object({ id: number });
-const DecideBody = object({ id: string, decision: literal("once", "always", "deny") });
+const DecideBody = object({ id: string, decision: literal("once", "deny") });
 const AnswerBody = object({ id: string, text: string });
-const HostBody = object({ host: string });
 const JobBody = object({ id: number });
 
 /** The deploy a request reached, from its context. */
@@ -148,8 +147,7 @@ export function createApi(instance: Instance, options: ApiOptions) {
 			return Response.json(await host.budget.allowMore(amount));
 		}
 		if (url.pathname === "/api/approvals" && request.method === "GET") {
-			const { fetchHosts } = await host.approvals.state();
-			return Response.json({ requests: await host.approvals.pending(), fetchHosts });
+			return Response.json({ requests: await host.approvals.pending() });
 		}
 		if (url.pathname === "/api/approvals/decide" && request.method === "POST") {
 			const body = await bodyOf(request, DecideBody);
@@ -162,12 +160,6 @@ export function createApi(instance: Instance, options: ApiOptions) {
 			if (body instanceof Response) return body;
 			const answered = await host.approvals.answer(body.id, body.text, by(request));
 			return answered === undefined ? Response.json({ error: "No such question waiting, or an empty answer" }, { status: 404 }) : Response.json(answered);
-		}
-		if (url.pathname === "/api/approvals/forget-host" && request.method === "POST") {
-			const body = await bodyOf(request, HostBody);
-			if (body instanceof Response) return body;
-			await host.approvals.disallowHost(body.host);
-			return Response.json({ ok: true });
 		}
 		if (url.pathname === "/api/transcript" && request.method === "GET") {
 			const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 300, 1), 1000);
