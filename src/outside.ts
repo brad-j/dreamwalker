@@ -7,7 +7,10 @@
 //
 // The owner's messages from before they were marked were plain `pi.user` entries in the root conversation, the only
 // ones there; those up to `OwnerMarks.since` are the owner's.
-import { CompactionEntry, type ContextView, type Cursor, defineDoc, defineEntry, type EntryId, type EntryRecord, ROOT_CONVERSATION_ID, UserEntry } from "@earendil-works/pi-durable";
+import type { Message } from "@earendil-works/pi-ai";
+import { CompactionEntry, type ContextView, defineDoc, defineEntry, type EntryRecord, type HookApi, ROOT_CONVERSATION_ID, UserEntry } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord";
+import { isObject } from "./parse.ts";
 
 /** A message from the owner, through the API. */
 export const OwnerMessage = defineEntry<{ by: string }>("dreamwalker.owner");
@@ -33,12 +36,14 @@ const owners = (entry: EntryRecord, conversationId: number, since: number) =>
 	OwnerMessage.is(entry) || (UserEntry.is(entry) && conversationId === ROOT_CONVERSATION_ID && Number(entry.id) <= since);
 
 /** Where one entry's text came from: "owner", the outside sources it adds, or nothing for the agent's own. */
-function sourceOf(entry: EntryRecord, messages: readonly { role: string; toolName?: string; toolCallId?: string }[], conversationId: number, reader: Omit<Reader, "summarized">): "owner" | string[] {
+function sourceOf(entry: EntryRecord, messages: readonly Message[], conversationId: number, reader: Omit<Reader, "summarized">): "owner" | string[] {
 	if (owners(entry, conversationId, reader.since)) return "owner";
 	return messages.flatMap((message) => {
 		if (message.role === "user") return [NOT_THE_OWNER];
-		if (message.role === "toolResult" && message.toolCallId !== reader.callId && message.toolName !== undefined && reader.isOutside(message.toolName)) return [message.toolName];
-		return [];
+		if (message.role !== "toolResult" || message.toolCallId === reader.callId) return [];
+		const details = message.details ?? null;
+		const flagged = isObject(details) && details.outside === true;
+		return reader.isOutside(message.toolName) || flagged ? [message.toolName] : [];
 	});
 }
 
@@ -65,25 +70,13 @@ export async function provenance(view: ContextView, conversationId: number, read
 	return { all: [...all], thisTurn: [...thisTurn] };
 }
 
+/** The memo a guarded call's outside sources are kept under, for a guard that tracks them (guards.ts). */
+export const OUTSIDE_BEFORE = "dreamwalker.outside-before";
+
 /**
- * Whether the history before `summary` had outside text: its entries, newest first, until one does. Every original
- * entry is still in the history, so an earlier summary in it is passed over rather than looked into.
+ * The outside sources in the conversation when this call was decided, for a tool whose guard tracks them. Without the
+ * record, as in a conversation the approvals hook doesn't run in, there's no telling, so it counts as outside.
  */
-export async function historyHadOutside(
-	history: (maxEntryId: EntryId, cursor: Cursor | undefined) => Promise<{ items: readonly EntryRecord[]; next?: Cursor }>,
-	summary: EntryRecord,
-	conversationId: number,
-	reader: Omit<Reader, "summarized" | "callId">,
-): Promise<boolean> {
-	let cursor: Cursor | undefined;
-	do {
-		const page = await history(summary.id, cursor);
-		for (const entry of page.items) {
-			if (entry.id === summary.id || CompactionEntry.is(entry)) continue;
-			const found = sourceOf(entry, entry.model ?? [], conversationId, reader);
-			if (found !== "owner" && found.length > 0) return true;
-		}
-		cursor = page.next;
-	} while (cursor !== undefined);
-	return false;
+export async function outsideBefore(api: Pick<HookApi, "memo">, context: Context): Promise<string[]> {
+	return (await api.memo<string[]>(OUTSIDE_BEFORE, context)) ?? ["a conversation it couldn't check"];
 }

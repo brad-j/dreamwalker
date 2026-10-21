@@ -41,6 +41,8 @@ export type Guard = {
 	readonly tool: string;
 	/** Its results are text from outside, which some other calls ask after (`ifOutsideText`). */
 	readonly outside: boolean;
+	/** The call is told what outside text came before it (`outsideBefore` in outside.ts), to keep with what it stores. */
+	readonly tracksOutside: boolean;
 	/** What the call asks, or nothing. Throws a ParseError when the arguments don't read right. */
 	readonly ask: (args: Args, situation: Situation) => Promise<Ask | undefined>;
 	/** Why the call can't succeed, read from the current state, or nothing. Checked before asking and again after an approval. Throws a ParseError when the arguments don't read right. */
@@ -55,6 +57,7 @@ export function guard<A>(
 		ask?: (args: A, situation: Situation) => Awaitable<Ask | undefined>;
 		refuse?: (args: A, read: DocumentReader, context: Context) => Awaitable<string | undefined>;
 		outside?: true;
+		tracksOutside?: true;
 	},
 ): Guard {
 	const { ask, refuse } = rules;
@@ -62,6 +65,7 @@ export function guard<A>(
 	return {
 		tool,
 		outside: rules.outside === true,
+		tracksOutside: rules.tracksOutside === true,
 		ask: async (args, situation) => (ask === undefined ? undefined : ask(read(args), situation)),
 		refuse: async (args, reader, context) => (refuse === undefined ? undefined : refuse(read(args), reader, context)),
 	};

@@ -6,8 +6,10 @@ import { type ConversationId, defineDoc, defineEntry, defineExtension, defineTas
 import { guard, ifOutsideText, quoted } from "./guards.ts";
 import { number, object, string } from "./parse.ts";
 import { formatClock, formatTime } from "./time.ts";
+import { outsideBefore } from "./outside.ts";
 
-export type Reminder = { taskId: number; text: string; at: number };
+/** `outside`: the outside sources in the conversation when it was set, whose text its own may carry. */
+export type Reminder = { taskId: number; text: string; at: number; outside?: string[] };
 export type Notify = (reminder: Reminder) => Promise<void>;
 
 /** Open reminders. A reminder leaves the list when it fires or is cancelled. */
@@ -94,10 +96,10 @@ export function createReminders(notify: Notify, owner = "the user") {
 		},
 	});
 
-	async function add(tx: Tx, conversationId: ConversationId, text: string, at: number): Promise<number> {
+	async function add(tx: Tx, conversationId: ConversationId, text: string, at: number, outside: readonly string[] = []): Promise<number> {
 		// Background: the conversation goes idle while it waits, and stopping a run doesn't cancel it.
 		const id = await tx.createTask(ReminderTask, { text, at }, { ownership: { kind: "conversation" }, conversationId, background: true });
-		(await tx.doc(Reminders)).items.push({ taskId: id, text, at });
+		(await tx.doc(Reminders)).items.push(outside.length === 0 ? { taskId: id, text, at } : { taskId: id, text, at, outside: [...outside] });
 		return id;
 	}
 
@@ -116,7 +118,8 @@ export function createReminders(notify: Notify, owner = "the user") {
 			const at = args.at === undefined ? Date.now() + args.inMinutes! * 60_000 : Date.parse(args.at);
 			if (Number.isNaN(at)) throw new Error(`Can't parse at: ${args.at}`);
 			if (at < Date.now() - 60_000) throw new Error(`${formatTime(at)} is in the past.`);
-			const taskId = await api.commit((tx) => add(tx, api.conversationId, args.text, at), context);
+			const outside = await outsideBefore(api, context);
+			const taskId = await api.commit((tx) => add(tx, api.conversationId, args.text, at, outside), context);
 			return { output: [{ type: "text", text: `Reminder ${taskId} set for ${formatTime(at)}${soon(at)}: ${args.text}` }] };
 		},
 	});
@@ -128,8 +131,11 @@ export function createReminders(notify: Notify, owner = "the user") {
 		replay: "safe",
 		execute: async (_args, api, context) => {
 			const items = (await api.snapshot(Reminders, context))?.items ?? [];
-			const text = items.length === 0 ? "No open reminders." : [...items].sort((a, b) => a.at - b.at).map((r) => `${r.taskId}: ${formatTime(r.at)}: ${r.text}`).join("\n");
-			return { output: [{ type: "text", text }] };
+			const flagged = (r: Reminder) => (r.outside?.length ?? 0) > 0;
+			const line = (r: Reminder) => `${r.taskId}: ${formatTime(r.at)}: ${r.text}${flagged(r) ? " (set after reading outside text)" : ""}`;
+			const text = items.length === 0 ? "No open reminders." : [...items].sort((a, b) => a.at - b.at).map(line).join("\n");
+			// A reminder set after outside text may carry it, so the list is outside text when it shows one.
+			return { output: [{ type: "text", text }], details: { outside: items.some(flagged) } };
 		},
 	});
 
@@ -146,11 +152,10 @@ export function createReminders(notify: Notify, owner = "the user") {
 	});
 
 	const guards = [
-		// A reminder's text is read back later by list_reminders as the agent's own, so setting one after outside text asks,
-		// as writing a note does: otherwise a page could leave an instruction there for a later turn.
-		guard("remind", object({ text: string }), {
-			ask: (a, situation) => ifOutsideText(situation, () => `set a reminder${quoted(a.text)}`),
-		}),
+		// A reminder's text is read back later by list_reminders, so a page could leave an instruction there for a later
+		// turn. Setting one doesn't ask; it keeps what outside text came before it, and the list counts as outside text when
+		// it shows such a reminder.
+		guard("remind", object({ text: string }), { tracksOutside: true }),
 		guard("cancel_reminder", object({ id: number }), {
 			ask: (a, situation) => ifOutsideText(situation, async () => `cancel reminder ${a.id}${quoted((await situation.snapshot(Reminders))?.items.find((r) => r.taskId === a.id)?.text)}`),
 		}),

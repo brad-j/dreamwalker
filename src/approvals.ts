@@ -14,10 +14,10 @@ import { randomUUID } from "node:crypto";
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT as background } from "@earendil-works/chord/context";
 import { type ToolCall, Type } from "@earendil-works/pi-ai";
-import { type ContextView, type ConversationId, defineDoc, defineEntry, defineExtension, defineTool, type DocumentReader, type EntryRecord, type Harness, type HookApi, hook, type ToolExecutionApi, ToolTask, type Tx } from "@earendil-works/pi-durable";
+import { type ContextView, type ConversationId, type Cursor, defineDoc, defineEntry, defineExtension, defineTool, type DocumentReader, type EntryRecord, type Harness, type HookApi, hook, type ToolExecutionApi, ToolTask, type Tx } from "@earendil-works/pi-durable";
 import type { Ask, Guard, Situation } from "./guards.ts";
 import { conversationId, taskId } from "./ids.ts";
-import { historyHadOutside, OwnerMarks, provenance } from "./outside.ts";
+import { OUTSIDE_BEFORE, OwnerMarks, provenance } from "./outside.ts";
 import { ParseError } from "./parse.ts";
 
 export type Decision = "once" | "deny";
@@ -99,7 +99,7 @@ export class ApprovalService {
 	readonly #timeoutMs: number;
 	readonly #waiters = new Map<string, Set<(request: ApprovalRequest) => void>>();
 	readonly #listeners = new Set<(request: ApprovalRequest) => void | Promise<void>>();
-	/** Whether the history each compaction summary replaced had outside text, by the summary's entry id: it never changes. */
+	/** Whether what each compaction summary newly replaced had outside text, by the summary's entry id: it never changes. */
 	readonly #summaries = new Map<string, Promise<boolean>>();
 
 	constructor(harness: Harness, options: { timeoutMs?: number } = {}) {
@@ -118,7 +118,7 @@ export class ApprovalService {
 			const key = `${id}:${summary.id}`;
 			let found = this.#summaries.get(key);
 			if (found === undefined) {
-				found = this.#historyHadOutside(id, summary, isOutside, since);
+				found = this.#replacedHadOutside(id, summary, isOutside, since);
 				this.#summaries.set(key, found);
 				found.catch(() => this.#summaries.delete(key));
 			}
@@ -127,10 +127,24 @@ export class ApprovalService {
 		return provenance(view, id, { isOutside, callId, since, summarized });
 	}
 
-	async #historyHadOutside(id: ConversationId, summary: EntryRecord, isOutside: (tool: string) => boolean, since: number): Promise<boolean> {
+	/**
+	 * Whether what `summary` newly replaced had outside text: the context as it stood just before the summary, as Pi's
+	 * compaction read it, with the earlier summary at its head passed over (outside.ts).
+	 */
+	async #replacedHadOutside(id: ConversationId, summary: EntryRecord, isOutside: (tool: string) => boolean, since: number): Promise<boolean> {
 		const conversation = await this.#harness.conversation(id, background);
 		if (conversation === undefined) return true;
-		return historyHadOutside((maxEntryId, cursor) => conversation.entries({ maxEntryId }, 200, cursor, background), summary, id, { isOutside, since });
+		// The newest entry before the summary that the model sees; entries that only hold data, like reports, aren't in contexts.
+		let before: EntryRecord | undefined;
+		let cursor: Cursor | undefined;
+		do {
+			const page = await conversation.entries({ maxEntryId: summary.id }, 50, cursor, background);
+			before = page.items.find((entry) => entry.id !== summary.id && (entry.model?.length ?? 0) > 0);
+			cursor = page.next;
+		} while (before === undefined && cursor !== undefined);
+		if (before === undefined) return false;
+		const view = await conversation.context(background, { at: before.id });
+		return (await provenance(view, id, { isOutside, since, summarized: async () => false })).all.length > 0;
 	}
 
 	/** Whether conversation `id` holds the owner's notes, as the main agent's do and job runs' and workers' don't. */
@@ -371,6 +385,8 @@ export function approvalExtension(service: () => ApprovalService, owner: string,
 					const isOutside = (tool: string) => all.some((g) => g.tool === tool && g.outside);
 					let found: Promise<{ all: string[]; thisTurn: string[] }> | undefined;
 					const sources = () => (found ??= contextOf(api, context).then((view) => approvals.provenance(api.conversationId, view, isOutside, call.id)));
+					// A tool that keeps what it was given, to be read back later, is told whether outside text came before it.
+					if (guard.tracksOutside) await api.memo<string[]>(OUTSIDE_BEFORE, (await sources()).all, context);
 					const ask = await askFor(guard, call, {
 						conversationId: api.conversationId,
 						callId: call.id,
