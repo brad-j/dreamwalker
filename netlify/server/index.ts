@@ -5,7 +5,7 @@
 // The storage opens on the first request, not here: Netlify Database's connection string, like the AI Gateway's
 // credentials, is only in the environment while a request is being handled.
 
-import { type Config, onShutdown } from "@netlify/server";
+import { type Config, getContext, onShutdown } from "@netlify/server";
 import { createApi } from "../../src/api.ts";
 import { budgetSettingsFrom } from "../../src/budget.ts";
 import { platformEnv, platformNames, Remembered } from "../../src/environment.ts";
@@ -54,6 +54,16 @@ const instance = startInstance(storage, chosen, {
 onShutdown(() => instance.close());
 export const shutdown = () => instance.close();
 
+/** The deploy the request being handled reached, as its context says, or undefined where there's no context. */
+const requestDeploy = () => {
+	try {
+		const { id, context, published } = getContext().deploy;
+		return { id, context, published };
+	} catch {
+		return undefined;
+	}
+};
+
 const startedAt = new Date().toISOString();
 const variablesAtStartup = platformNames();
 
@@ -74,6 +84,9 @@ export default createApi(instance, {
 	describe: () => ({
 		startedAt,
 		deployId: platformEnv("DEPLOY_ID"),
+		requestDeployId: requestDeploy()?.id,
+		requestDeployContext: requestDeploy()?.context,
+		requestDeployPublished: requestDeploy()?.published,
 		context: platformEnv("CONTEXT"),
 		storageKind: memory ? "memory" : "Netlify Database",
 		databaseUrlAgeSeconds: databaseUrl.age(),
