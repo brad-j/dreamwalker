@@ -17,6 +17,8 @@ export type AgentRecord = {
 	job: string;
 	instructions?: string;
 	sharedNotes: boolean;
+	/** Tools beyond the main agent's it's been given, by grant name: "netlify". */
+	grants?: string[];
 	conversationId: number;
 	createdAt: number;
 	archivedAt?: number;

@@ -11,6 +11,7 @@ import { budgetSettingsFrom } from "../../src/budget.ts";
 import { platformEnv, Remembered } from "../../src/environment.ts";
 import { memoryStorage, startInstance } from "../../src/instance.ts";
 import { Credentials, modelFor, modelSettingsFrom } from "../../src/model.ts";
+import { netlifySettingsFrom } from "../../src/netlify.ts";
 import { ntfyAdapter, ntfySettingsFrom } from "../../src/ntfy.ts";
 import { claudeSearch } from "../../src/search.ts";
 import { CLOSED_NETWORK, clearTask, probe, SandboxCredentials, sandboxFor, WORKER_LAYOUT, WORKER_NETWORK, WORKER_SANDBOX } from "../../src/sandbox.ts";
@@ -67,6 +68,7 @@ const instance = startInstance(storage, chosen, {
 	owner,
 	search,
 	workspace,
+	netlify: { settings: netlifySettingsFrom(process.env) },
 	budget,
 	adapters: ntfy === undefined ? {} : { ntfy: ntfyAdapter(ntfy) },
 });

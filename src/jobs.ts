@@ -227,10 +227,11 @@ export function createJobs(options: {
 	owner: string;
 	explain?: (reason: string | undefined) => string | undefined;
 	/**
-	 * What a run doesn't get besides the job tools: the owner's notes. A run reads its earlier reports, which are outside
-	 * text, before anything the owner says, so it holds nothing of theirs for a page to have it send out.
+	 * What a run of agent `agent`'s job gets beyond the main agent's tools (its agent's grants), and doesn't get besides
+	 * the job tools (the owner's notes: a run reads its earlier reports, which are outside text, before anything the owner
+	 * says, so it holds nothing of theirs for a page to have it send out).
 	 */
-	withhold?: () => readonly Extension[];
+	runExtensions?: (tx: Tx, agent: string) => Promise<{ add: readonly Extension[]; remove: readonly Extension[] }>;
 }) {
 	const { owner } = options;
 
@@ -340,7 +341,8 @@ export function createJobs(options: {
 						const job = await findJob(tx, task.id);
 						if (job === undefined) return { status: "terminal", outcome: { status: "completed", result: "cancelled" } };
 						const created = await tx.createConversation({ ownership: { kind: "task", taskId: runtime.taskId } });
-						await configure(tx, created.id, { extensions: { remove: [extension, ...(options.withhold?.() ?? [])] } });
+						const change = (await options.runExtensions?.(tx, job.agent ?? DEFAULT_AGENT)) ?? { add: [], remove: [] };
+						await configure(tx, created.id, { extensions: { add: [...change.add], remove: [extension, ...change.remove] } });
 						return { status: "running", checkpoint: { ...task.state.checkpoint, conversationId: created.id } };
 					}, context);
 					return;

@@ -16,7 +16,8 @@ import { createMemory } from "./memory.ts";
 import { type Chosen } from "./model.ts";
 import { type Adapters, createNotifications } from "./notifications.ts";
 import { OwnerMarks, OwnerMessage } from "./outside.ts";
-import { DEFAULT_AGENT, inheritAgent } from "./roster.ts";
+import { Agents, DEFAULT_AGENT, inheritAgent } from "./roster.ts";
+import { createNetlify, type NetlifySettings } from "./netlify.ts";
 import { createReminders } from "./reminders.ts";
 import { setTimeZone, stamp } from "./time.ts";
 import { createWorker } from "./worker.ts";
@@ -46,6 +47,8 @@ export type HostOptions = {
 	 * and `clear` clears what a task left once it ends. Without one there are none.
 	 */
 	workspace?: { env: (dir: string) => ExecutionEnv; clear: (dir: string) => Promise<void> };
+	/** The Netlify tools' token and team, and a fake API for tests; without settings the tools say they aren't set up. */
+	netlify?: { settings?: NetlifySettings; fetch?: typeof globalThis.fetch };
 };
 
 export async function openHost(storage: Storage, chosen: Chosen, options: HostOptions = {}) {
@@ -61,11 +64,15 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	const reminders = createReminders((reminder) => notifications.send({ kind: "reminder", reminder }), owner);
 	// A run the spend guard refused says why, rather than counting as the job failing.
 	const memory = createMemory(owner);
+	// The tools an agent can be granted beyond the main agent's.
+	const netlify = createNetlify(options.netlify?.settings, { fetch: options.netlify?.fetch });
+	const grants = { netlify: [netlify.extension] };
+	const granted = (names: readonly string[] | undefined) => (names ?? []).flatMap((g) => (g === "netlify" ? grants.netlify : []));
 	const jobs = createJobs({
 		deliver: (report) => notifications.send(report.paused === true ? { kind: "paused", report } : { kind: "report", report }),
 		owner,
 		explain: (reason) => (reason === "no_model" ? budget.blocked() : undefined),
-		withhold: () => [memory.extension],
+		runExtensions: async (tx, agent) => ({ add: granted((await tx.doc(Agents)).items.find((a) => a.id === agent)?.grants), remove: [memory.extension] }),
 	});
 	const preamble = identity(owner);
 	// What a worker works with: the way out to the internet, which the main agent doesn't have (worker.ts).
@@ -74,13 +81,13 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	const workspace = options.workspace === undefined ? undefined : createWorkspace(owner);
 	const workerTools = [web.extension, ...(search === undefined ? [] : [search.extension]), ...(workspace?.extensions ?? [])];
 	const worker = createWorker({ owner, model: chosen.model, tools: [...workerTools, budget.extension], clear: options.workspace?.clear });
-	const guards = [...web.guards, ...(search?.guards ?? []), ...(workspace?.guards ?? []), ...worker.guards, ...memory.guards, ...reminders.guards, ...jobs.guards];
+	const guards = [...web.guards, ...(search?.guards ?? []), ...(workspace?.guards ?? []), ...worker.guards, ...netlify.guards, ...memory.guards, ...reminders.guards, ...jobs.guards];
 	// The service needs the Harness, which needs the registry; the hook reads it once something calls.
 	let approvals: ApprovalService | undefined;
 	// The main agent's tools, which every conversation has unless it says otherwise: the root, and the runs of jobs.
 	const main = [preamble, memory.extension, reminders.extension, jobs.extension, worker.extension, approvalExtension(() => approvals!, owner, () => guards), budget.extension];
 	const registry = createRegistry();
-	for (const extension of [...main, worker.instructions, ...workerTools]) registry.install(extension);
+	for (const extension of [...main, worker.instructions, ...workerTools, netlify.extension]) registry.install(extension);
 	const harness = await Harness.open(
 		storage,
 		{
@@ -108,8 +115,8 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 		marks.since = newest === undefined ? 0 : Number(newest.id);
 	}, context);
 	approvals = new ApprovalService(harness, { timeoutMs: options.approvalTimeoutMs });
-	const agents = createAgents(harness, () => chosen.model);
-	await agents.configureModels();
+	const agents = createAgents(harness, () => chosen.model, grants);
+	await agents.configureHomes();
 	// After the root exists, before anything runs: a resumed run is checked against the limits too.
 	await budget.attach(harness);
 	harness.resume();
@@ -155,7 +162,7 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 		}, context);
 	}
 
-	return { harness, root, agents, ask, send, busy, budget, reminders, jobs, approvals, close: () => harness.close(context) };
+	return { harness, root, agents, netlify, ask, send, busy, budget, reminders, jobs, approvals, close: () => harness.close(context) };
 }
 
 export type Host = Awaited<ReturnType<typeof openHost>>;

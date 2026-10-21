@@ -1,5 +1,6 @@
 // Named agents, from gaidin: specialists the owner adds beside dreamwalker, each with a name, a one-line job, standing
-// instructions, and a home conversation of its own. Each has its own work notes, reminders and jobs, sees the shared
+// instructions, a home conversation of its own, and grants: tools beyond the main agent's, such as "netlify", which its
+// conversations and its jobs' runs get and no other agent's do. Each has its own work notes, reminders and jobs, sees the shared
 // notes about the owner unless its entry turns them off (memory.ts), and works like dreamwalker otherwise: the owner's
 // data in its conversations, no way out to the internet, and workers for the web (worker.ts). The roster and which
 // agent a conversation belongs to are in roster.ts.
@@ -8,7 +9,7 @@
 // stay. Restoring it leaves its jobs paused, for the owner to resume.
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT as background } from "@earendil-works/chord/context";
-import { defineExtension, type Harness, type ModelRef, section } from "@earendil-works/pi-durable";
+import { defineExtension, type Extension, type Harness, type ModelRef, section } from "@earendil-works/pi-durable";
 import { conversationId } from "./ids.ts";
 import { Jobs, pauseJob } from "./jobs.ts";
 import { Reminders, removeReminder } from "./reminders.ts";
@@ -29,7 +30,7 @@ export class AgentUnavailable extends Error {
 }
 
 /** What the owner gives a new agent. */
-export type AgentFields = { name: string; job: string; instructions?: string; sharedNotes?: boolean };
+export type AgentFields = { name: string; job: string; instructions?: string; sharedNotes?: boolean; grants?: string[] };
 
 /** An agent's id from its name: lowercase letters, digits and single hyphens. */
 export const idFrom = (name: string) =>
@@ -39,8 +40,10 @@ export const idFrom = (name: string) =>
 		.replace(/^-+|-+$/g, "")
 		.slice(0, MAX_NAME);
 
-/** Why `fields` can't describe an agent, or nothing. */
-export function agentProblem(fields: Partial<AgentFields>): string | undefined {
+/** Why `fields` can't describe an agent, given the grants there are, or nothing. */
+export function agentProblem(fields: Partial<AgentFields>, grants: readonly string[] = []): string | undefined {
+	const unknown = (fields.grants ?? []).filter((g) => !grants.includes(g));
+	if (unknown.length > 0) return `No such grant: ${unknown.join(", ")}. There are: ${grants.join(", ") || "none"}.`;
 	if (fields.name !== undefined && (fields.name.trim() === "" || fields.name.trim().length > MAX_NAME)) return `A name is 1 to ${MAX_NAME} characters.`;
 	if (fields.name !== undefined && idFrom(fields.name) === "") return "A name needs a letter or a digit.";
 	if (fields.job !== undefined && (fields.job.trim() === "" || fields.job.trim().length > MAX_JOB)) return `A job is 1 to ${MAX_JOB} characters: what the agent does, in a line.`;
@@ -69,7 +72,14 @@ export function identity(owner: string) {
 	});
 }
 
-export function createAgents(harness: Harness, model: () => ModelRef) {
+/**
+ * `grants` maps each grant's name to the extensions it gives. dreamwalker has none; its conversations follow the main
+ * agent's tools.
+ */
+export function createAgents(harness: Harness, model: () => ModelRef, grants: { readonly [name: string]: readonly Extension[] } = {}) {
+	const known = Object.keys(grants);
+	/** The tools a home conversation gets beyond the main agent's, for `granted`. */
+	const extra = (granted: readonly string[] | undefined) => (granted ?? []).flatMap((g) => grants[g] ?? []);
 	const roster = async () => (await harness.snapshot(Agents, background))?.items ?? [];
 	const root = () => harness.root(background);
 
@@ -95,15 +105,16 @@ export function createAgents(harness: Harness, model: () => ModelRef) {
 
 		/** Adds an agent with a home conversation of its own, on the site's model. */
 		async add(fields: AgentFields): Promise<AgentRecord> {
-			const problem = agentProblem(fields);
+			const problem = agentProblem(fields, known);
 			if (problem !== undefined) throw new Error(problem);
 			const id = idFrom(fields.name);
 			if (id === DEFAULT_AGENT || (await roster()).some((a) => a.id === id)) throw new Error(`There's already an agent called ${id}`);
-			const home = await harness.createConversation({ ownership: { kind: "ownerless" }, agent: { model: model() } }, background);
+			const home = await harness.createConversation({ ownership: { kind: "ownerless" }, agent: { model: model(), extensions: { add: extra(fields.grants) } } }, background);
 			return (await root()).commit(async (tx) => {
 				(await tx.doc(AgentOf, home.id)).agent = id;
 				const record: AgentRecord = { id, name: fields.name.trim(), job: fields.job.trim(), sharedNotes: fields.sharedNotes ?? true, conversationId: home.id, createdAt: Date.now() };
 				if (fields.instructions !== undefined && fields.instructions.trim() !== "") record.instructions = fields.instructions.trim();
+				if (fields.grants !== undefined && fields.grants.length > 0) record.grants = [...new Set(fields.grants)];
 				(await tx.doc(Agents)).items.push(record);
 				return { ...record };
 			}, background);
@@ -111,10 +122,10 @@ export function createAgents(harness: Harness, model: () => ModelRef) {
 
 		/** Changes an agent's name, job, instructions or whether it sees the shared notes. Its id stays. */
 		async update(id: string, changes: Partial<AgentFields>): Promise<AgentRecord> {
-			const problem = agentProblem(changes);
+			const problem = agentProblem(changes, known);
 			if (problem !== undefined) throw new Error(problem);
 			await get(id);
-			return (await root()).commit(async (tx) => {
+			const updated = await (await root()).commit(async (tx) => {
 				const record = (await tx.doc(Agents)).items.find((a) => a.id === id)!;
 				if (changes.name !== undefined) record.name = changes.name.trim();
 				if (changes.job !== undefined) record.job = changes.job.trim();
@@ -123,9 +134,24 @@ export function createAgents(harness: Harness, model: () => ModelRef) {
 					if (changes.instructions.trim() === "") delete record.instructions;
 					else record.instructions = changes.instructions.trim();
 				}
+				if (changes.grants !== undefined) {
+					if (changes.grants.length === 0) delete record.grants;
+					else record.grants = [...new Set(changes.grants)];
+				}
 				return { ...record };
 			}, background);
+			if (changes.grants !== undefined) await this.configure(updated);
+			return updated;
 		},
+
+		/** Puts an agent's home on the site's model, with the tools its grants give. */
+		async configure(record: AgentRecord): Promise<void> {
+			const home = await harness.conversation(conversationId(record.conversationId), background);
+			await home?.configure({ model: model(), extensions: { add: extra(record.grants) } }, background);
+		},
+
+		/** The tools a run of agent `agent`'s job gets beyond the main agent's, read in the commit making the run. */
+		extra,
 
 		/** Archives an agent: its jobs pause, its reminders are cancelled, and it can't be talked to. */
 		async archive(id: string): Promise<AgentRecord> {
@@ -149,10 +175,13 @@ export function createAgents(harness: Harness, model: () => ModelRef) {
 			}, background);
 		},
 
-		/** Moves every agent's home to the site's model, as the root is moved when the host opens. */
-		async configureModels(): Promise<void> {
-			for (const record of await roster()) await (await harness.conversation(conversationId(record.conversationId), background))?.configure({ model: model() }, background);
+		/** Every agent's home on the site's model with its grants' tools, as the root is moved when the host opens. */
+		async configureHomes(): Promise<void> {
+			for (const record of await roster()) await this.configure(record);
 		},
+
+		/** The grants there are. */
+		grants: known,
 	};
 }
 

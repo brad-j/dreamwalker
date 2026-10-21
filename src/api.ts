@@ -8,7 +8,7 @@ import type { ReadEnv } from "./environment.ts";
 import type { Instance } from "./instance.ts";
 import type { Credentials } from "./model.ts";
 import { addNote, forgetNote, MAX_NOTE, MAX_TOTAL, Memory, noteId, noteProblem, updateNote } from "./memory.ts";
-import { boolean, literal, number, object, optional, parse, ParseError, type Parser, string } from "./parse.ts";
+import { array, boolean, literal, number, object, optional, parse, ParseError, type Parser, string } from "./parse.ts";
 import { context } from "./host.ts";
 import { Jobs, pauseJob, removeJob, resumeJob } from "./jobs.ts";
 import { Reminders, removeReminder } from "./reminders.ts";
@@ -18,8 +18,8 @@ import { AgentUnavailable } from "./agents.ts";
 import { DEFAULT_AGENT } from "./roster.ts";
 
 const AskBody = object({ message: string, requestId: optional(string), agent: optional(string) });
-const AddAgentBody = object({ name: string, job: string, instructions: optional(string), sharedNotes: optional(boolean) });
-const UpdateAgentBody = object({ id: string, name: optional(string), job: optional(string), instructions: optional(string), sharedNotes: optional(boolean) });
+const AddAgentBody = object({ name: string, job: string, instructions: optional(string), sharedNotes: optional(boolean), grants: optional(array(string)) });
+const UpdateAgentBody = object({ id: string, name: optional(string), job: optional(string), instructions: optional(string), sharedNotes: optional(boolean), grants: optional(array(string)) });
 const AgentBody = object({ id: string });
 const AllowBody = object({ amount: optional(number) });
 const AddNoteBody = object({ text: string });
@@ -178,7 +178,16 @@ export function createApi(instance: Instance, options: ApiOptions) {
 		}
 		if (url.pathname === "/api/agents" && request.method === "GET") {
 			const named = await host.agents.list();
-			return Response.json({ agents: [{ id: DEFAULT_AGENT, name: DEFAULT_AGENT, job: "Your personal agent", sharedNotes: true, default: true }, ...named] });
+			return Response.json({ agents: [{ id: DEFAULT_AGENT, name: DEFAULT_AGENT, job: "Your personal agent", sharedNotes: true, default: true }, ...named], grants: host.agents.grants });
+		}
+		if (url.pathname === "/api/netlify/check" && request.method === "GET") {
+			// Which team the Netlify token reaches, by its slug, or why the tools refuse; never the token or the team's id.
+			if (!host.netlify.configured) return Response.json({ configured: false });
+			try {
+				return Response.json({ configured: true, team: await host.netlify.check() });
+			} catch (error) {
+				return Response.json({ configured: true, error: message(error) });
+			}
 		}
 		const agentRoute = /^\/api\/agents\/(add|update|archive|restore)$/.exec(url.pathname)?.[1];
 		if (agentRoute !== undefined && request.method === "POST") {

@@ -78,7 +78,7 @@ test("the main agent has no way out to the internet, and a worker has none of th
 	const workerId = (await host.root.context(context)).messages.flatMap((m) => (m.role === "toolResult" && m.toolName === "delegate" ? [(m.details as { conversationId: number }).conversationId] : []))[0]!;
 	const tools = await toolNames(host, workerId);
 	for (const tool of ["fetch_url", "web_search", "bash", "read", "write", "edit"]) assert.ok(tools.includes(tool), tool);
-	for (const tool of ["delegate", "remember", "update_memory", "forget", "remind", "schedule_job", "cancel_job", "ask_owner"]) assert.ok(!tools.includes(tool), `a worker has ${tool}`);
+	for (const tool of ["delegate", "remember", "update_memory", "forget", "remind", "schedule_job", "cancel_job", "ask_owner", "netlify_sites"]) assert.ok(!tools.includes(tool), `a worker has ${tool}`);
 
 	// The worker saw its task and nothing else: not the note, not the owner's message.
 	assert.equal(workerUsers.length, 1);
