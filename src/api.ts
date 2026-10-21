@@ -16,6 +16,7 @@ import { transcript } from "./transcript.ts";
 import type { SandboxCheck } from "./sandbox-check.ts";
 import { AgentUnavailable } from "./agents.ts";
 import { DEFAULT_AGENT } from "./roster.ts";
+import type { tailscaleCheck } from "./lan.ts";
 
 const AskBody = object({ message: string, requestId: optional(string), agent: optional(string) });
 const AddAgentBody = object({ name: string, job: string, instructions: optional(string), sharedNotes: optional(boolean), grants: optional(array(string)), contacts: optional(array(string)) });
@@ -47,6 +48,8 @@ export type ApiOptions = {
 	probe?: (name: string) => Promise<Record<string, string | number>>;
 	/** Runs Pi Durable's environment conformance on the agent's sandbox, for `/api/sandbox/check`; absent where there are no sandboxes. */
 	sandboxCheck?: SandboxCheck;
+	/** Tries Tailscale in a sandbox (lan.ts), for `/api/sandbox/tailscale`; absent where there are no sandboxes. */
+	tailscaleCheck?: ReturnType<typeof tailscaleCheck>;
 	/** Deletes a sandbox and its disk, for `/api/sandbox/delete`; absent where there are no sandboxes. */
 	deleteSandbox?: (name: string) => Promise<void>;
 	/** The deploy the request being handled reached; undefined where there's no request context, as in tests. */
@@ -143,6 +146,13 @@ export function createApi(instance: Instance, options: ApiOptions) {
 			} catch (error) {
 				return Response.json({ error: message(error) }, { status: 502 });
 			}
+		}
+		if (url.pathname === "/api/sandbox/tailscale") {
+			if (options.tailscaleCheck === undefined) return Response.json({ error: "No sandboxes here" }, { status: 404 });
+			if (request.method === "GET") return Response.json(options.tailscaleCheck.latest() ?? { error: "No check has run on this instance" });
+			const name = url.searchParams.get("name") ?? "dreamwalker-tailscale-probe";
+			if (!/^dreamwalker-tailscale(-[a-z0-9]+)*$/.test(name) || name.length > 40) return Response.json({ error: "name should be dreamwalker-tailscale or start dreamwalker-tailscale-" }, { status: 400 });
+			if (request.method === "POST") return Response.json(options.tailscaleCheck.start(name), { status: 202 });
 		}
 		if (url.pathname === "/api/sandbox/check") {
 			if (options.sandboxCheck === undefined) return Response.json({ error: "No sandboxes here" }, { status: 404 });

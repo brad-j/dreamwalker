@@ -15,6 +15,7 @@ import { netlifySettingsFrom } from "../../src/netlify.ts";
 import { ntfyAdapter, ntfySettingsFrom } from "../../src/ntfy.ts";
 import { claudeSearch } from "../../src/search.ts";
 import { CLOSED_NETWORK, clearTask, probe, SandboxCredentials, sandboxFor, WORKER_LAYOUT, WORKER_NETWORK, WORKER_SANDBOX } from "../../src/sandbox.ts";
+import { isTailscaleSandbox, TAILSCALE_NETWORK, tailscaleCheck } from "../../src/lan.ts";
 import { sandboxCheck } from "../../src/sandbox-check.ts";
 import { boxOf, SandboxEnv } from "../../src/sandbox-env.ts";
 import { holderFor, openDatabaseStorage } from "../../src/storage/index.ts";
@@ -54,7 +55,7 @@ const chosen = modelFor(settings, credentials);
 const search =
 	settings.provider === "faux" ? undefined : claudeSearch(() => credentials.current(platformEnv), settings.id, chosen.models.getModel("anthropic", settings.id)?.cost);
 // The worker's computer is a Netlify Sandbox, reached with the credentials the newest request showed.
-const networkFor = (name: string) => (name === WORKER_SANDBOX ? WORKER_NETWORK : CLOSED_NETWORK);
+const networkFor = (name: string) => (name === WORKER_SANDBOX ? WORKER_NETWORK : isTailscaleSandbox(name) ? TAILSCALE_NETWORK : CLOSED_NETWORK);
 const workerSandbox = {
 	id: `sandbox:${WORKER_SANDBOX}`,
 	root: "/root/.dreamwalker",
@@ -119,6 +120,7 @@ export default createApi(instance, {
 	},
 	probe: async (name) => probe(await sandboxFor(sandboxCredentials, platformEnv, name, networkFor(name))),
 	sandboxCheck: sandboxCheck({ ...workerSandbox, scratch: "/root/.dreamwalker-check" }),
+	tailscaleCheck: tailscaleCheck(async (name) => boxOf(await sandboxFor(sandboxCredentials, platformEnv, name, TAILSCALE_NETWORK))),
 	// Finding a sandbox by name makes it if there's none, so deleting one that's gone makes and deletes it.
 	deleteSandbox: async (name) => (await sandboxFor(sandboxCredentials, platformEnv, name, networkFor(name))).delete(),
 	credentials,
