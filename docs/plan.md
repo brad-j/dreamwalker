@@ -69,6 +69,7 @@
 ## Open questions
 
 - How long the Gateway's credentials stay good after the request that brought them. If it's shorter than the gap between wake-ups, background calls need a key set on the site. Scheduled jobs are the first model calls made outside a request; reminders only push.
+- Reaching the owner's LAN with Tailscale in a sandbox doesn't work, tried on 2026-10-21: the static binaries download and tailscaled starts in userspace mode, but a sandbox's only interface is loopback (its default route is too), and dummy and TUN devices can't be made, so tailscaled never sees a usable address and keeps its control client paused; with an allowlist of Tailscale's hosts, its IP-addressed DERP probes are refused as well. Tailscale in the Server process is no better (it sleeps, and is replaced). The way left is a small relay on the LAN that exposes only chosen endpoints, through Tailscale Funnel, with a token dreamwalker keeps.
 - Sandboxes are experimental on Netlify. Not yet known: what signal the SDK's `kill` sends inside the sandbox (the helper stops a command's own processes on SIGTERM or SIGINT, not on SIGKILL), how much output a sandbox keeps for a process, and what a sandbox costs.
 - Commits are a dozen or so round trips on one connection. Fine in the same region as the database; worth measuring once deployed.
 
