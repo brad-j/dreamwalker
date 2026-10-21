@@ -26,8 +26,8 @@ export type AgentRecord = {
 
 export const Agents = defineDoc<{ items: AgentRecord[] }>({ kind: "dreamwalker.agents", version: 1, scope: "session", initial: () => ({ items: [] }) });
 
-/** The agent a conversation belongs to. A fork keeps its source's. */
-export const AgentOf = defineDoc<{ agent: string }>({
+/** The agent a conversation belongs to, and whether it's a worker's (worker.ts). A fork keeps its source's. */
+export const AgentOf = defineDoc<{ agent: string; worker?: boolean }>({
 	kind: "dreamwalker.agent-of",
 	version: 1,
 	scope: "conversation",

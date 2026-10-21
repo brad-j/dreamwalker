@@ -18,6 +18,7 @@ import { assistantText } from "./answers.ts";
 import { clip, guard, ifOutsideTextThisTurn } from "./guards.ts";
 import { conversationId } from "./ids.ts";
 import { object, string } from "./parse.ts";
+import { AgentOf } from "./roster.ts";
 import { stamp } from "./time.ts";
 
 /** How much of a worker's answer the main agent is given. */
@@ -73,6 +74,7 @@ export function createWorker(options: WorkerOptions) {
 				const created = await api.commit(async (tx) => {
 					const made = await tx.createConversation({ ownership: { kind: "task", taskId: api.taskId } });
 					await configure(tx, made.id, { ...agent, cwd: dir });
+					(await tx.doc(AgentOf, made.id)).worker = true;
 					return made;
 				}, context);
 				id = await api.memo<number>("dreamwalker.worker", created.id, context);

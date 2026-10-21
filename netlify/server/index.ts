@@ -18,6 +18,7 @@ import { CLOSED_NETWORK, clearTask, probe, SandboxCredentials, sandboxFor, WORKE
 import { sandboxCheck } from "../../src/sandbox-check.ts";
 import { boxOf, SandboxEnv } from "../../src/sandbox-env.ts";
 import { holderFor, openDatabaseStorage } from "../../src/storage/index.ts";
+import { postgresHistory } from "../../src/history.ts";
 
 export const config: Config = { path: "/api/*" };
 
@@ -90,6 +91,7 @@ const sandboxToken = () => {
 };
 const instance = startInstance(storage, chosen, {
 	secrets,
+	history: memory ? undefined : postgresHistory(connectionString),
 	owner,
 	search,
 	workspace,
