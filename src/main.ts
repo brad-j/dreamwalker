@@ -17,7 +17,7 @@ const USAGE = `usage: dreamwalker COMMAND
   remember "TEXT"           add a note
   forget ID                 delete a note, such as n3
   requests                  what's waiting for you: calls to allow and questions
-  approve ID                allow a call
+  approve ID [--always]     allow a call once, or with --always its wider grant (the host)
   deny ID                   refuse a call
   answer ID "TEXT"          answer a question; IDs can be shortened to their start
   jobs                      scheduled jobs, soonest first
@@ -43,7 +43,7 @@ async function fullId(client: ReturnType<typeof createClient>, prefix: string): 
 }
 
 async function main(argv: string[]): Promise<number> {
-	const { values, positionals } = parseArgs({ args: argv, options: { id: { type: "string" }, help: { type: "boolean", short: "h" } }, allowPositionals: true });
+	const { values, positionals } = parseArgs({ args: argv, options: { id: { type: "string" }, always: { type: "boolean" }, help: { type: "boolean", short: "h" } }, allowPositionals: true });
 	const [command, ...rest] = positionals;
 	if (values.help || command === undefined || command === "help") {
 		console.log(USAGE);
@@ -88,9 +88,10 @@ async function main(argv: string[]): Promise<number> {
 			console.log(`forgot ${rest[0]}`);
 			return 0;
 		case "requests": {
-			const { requests } = await client.requests();
+			const { requests, fetchHosts } = await client.requests();
 			if (requests.length === 0) console.log("nothing waiting");
-			for (const r of requests) console.log(`${r.id.slice(0, 8)}  ${r.kind === "question" ? "question" : r.tool}: ${r.summary}${r.choices === undefined ? "" : `  [${r.choices.join(" / ")}]`}`);
+			for (const r of requests) console.log(`${r.id.slice(0, 8)}  ${r.kind === "question" ? "question" : r.tool}: ${r.summary}${r.choices === undefined ? "" : `  [${r.choices.join(" / ")}]`}${r.always === undefined ? "" : `  (--always: ${r.always.label})`}`);
+			if (fetchHosts.length > 0) console.log(`hosts allowed for good: ${fetchHosts.join(", ")}`);
 			return 0;
 		}
 		case "approve":
@@ -103,7 +104,7 @@ async function main(argv: string[]): Promise<number> {
 				if (text === "") throw new Error('answer needs the answer: dreamwalker answer ID "..."');
 				console.log(`answered: ${(await client.answer(id, text)).summary}`);
 			} else {
-				const done = await client.decide(id, command === "deny" ? "deny" : "once");
+				const done = await client.decide(id, command === "deny" ? "deny" : values.always ? "always" : "once");
 				console.log(`${done.status}: ${done.summary}`);
 			}
 			return 0;

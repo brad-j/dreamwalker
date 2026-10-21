@@ -21,8 +21,9 @@ const AddNoteBody = object({ text: string });
 const UpdateNoteBody = object({ id: noteId, text: string });
 const ForgetNoteBody = object({ id: noteId });
 const CancelReminderBody = object({ id: number });
-const DecideBody = object({ id: string, decision: literal("once", "deny") });
+const DecideBody = object({ id: string, decision: literal("once", "always", "deny") });
 const AnswerBody = object({ id: string, text: string });
+const HostBody = object({ host: string });
 const JobBody = object({ id: number });
 
 export type ApiOptions = {
@@ -39,6 +40,8 @@ export type ApiOptions = {
 	probe?: (name: string) => Promise<Record<string, string | number>>;
 	/** Runs Pi Durable's environment conformance on the agent's sandbox, for `/api/sandbox/check`; absent where there are no sandboxes. */
 	sandboxCheck?: SandboxCheck;
+	/** Deletes a sandbox and its disk, for `/api/sandbox/delete`; absent where there are no sandboxes. */
+	deleteSandbox?: (name: string) => Promise<void>;
 	/** What the status route reports about the instance. */
 	describe: () => Record<string, string | number | boolean | undefined | VariableNames>;
 };
@@ -105,6 +108,17 @@ export function createApi(instance: Instance, options: ApiOptions) {
 				return Response.json({ error: message(error) }, { status: 502 });
 			}
 		}
+		if (url.pathname === "/api/sandbox/delete" && request.method === "POST") {
+			if (options.deleteSandbox === undefined) return Response.json({ error: "No sandboxes here" }, { status: 404 });
+			const name = url.searchParams.get("name") ?? "";
+			if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(name) || name.length > 40) return Response.json({ error: "name should be lowercase letters, digits and single hyphens, up to 40" }, { status: 400 });
+			try {
+				await options.deleteSandbox(name);
+				return Response.json({ deleted: name });
+			} catch (error) {
+				return Response.json({ error: message(error) }, { status: 502 });
+			}
+		}
 		if (url.pathname === "/api/sandbox/check") {
 			if (options.sandboxCheck === undefined) return Response.json({ error: "No sandboxes here" }, { status: 404 });
 			// POST starts a run, or finds the one going; GET shows the latest. A run takes minutes, so poll it.
@@ -123,7 +137,8 @@ export function createApi(instance: Instance, options: ApiOptions) {
 			return Response.json(await host.budget.allowMore(amount));
 		}
 		if (url.pathname === "/api/approvals" && request.method === "GET") {
-			return Response.json({ requests: await host.approvals.pending() });
+			const { fetchHosts } = await host.approvals.state();
+			return Response.json({ requests: await host.approvals.pending(), fetchHosts });
 		}
 		if (url.pathname === "/api/approvals/decide" && request.method === "POST") {
 			const body = await bodyOf(request, DecideBody);
@@ -136,6 +151,12 @@ export function createApi(instance: Instance, options: ApiOptions) {
 			if (body instanceof Response) return body;
 			const answered = await host.approvals.answer(body.id, body.text, by(request));
 			return answered === undefined ? Response.json({ error: "No such question waiting, or an empty answer" }, { status: 404 }) : Response.json(answered);
+		}
+		if (url.pathname === "/api/approvals/forget-host" && request.method === "POST") {
+			const body = await bodyOf(request, HostBody);
+			if (body instanceof Response) return body;
+			await host.approvals.disallowHost(body.host);
+			return Response.json({ ok: true });
 		}
 		if (url.pathname === "/api/transcript" && request.method === "GET") {
 			const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 300, 1), 1000);

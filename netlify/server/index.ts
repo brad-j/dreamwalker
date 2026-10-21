@@ -68,6 +68,8 @@ export default createApi(instance, {
 	},
 	probe: async (name) => probe(await sandboxFor(sandboxCredentials, platformEnv, name)),
 	sandboxCheck: sandboxCheck({ ...agentSandbox, scratch: "/root/.dreamwalker-check" }),
+	// Finding a sandbox by name makes it if there's none, so deleting one that's gone makes and deletes it.
+	deleteSandbox: async (name) => (await sandboxFor(sandboxCredentials, platformEnv, name)).delete(),
 	credentials,
 	describe: () => ({
 		startedAt,

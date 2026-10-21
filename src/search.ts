@@ -4,14 +4,16 @@
 // the model's notes on them with their citations.
 //
 // Queries go only to Anthropic, from the server, so they don't ask the owner. Results are other people's text, so
-// they're labelled as such and count as outside text for the memory guard.
+// they're labelled as such and count as outside text for the memory guard. Each result's URL goes in the tool
+// result's details too, which the model can't write, so fetch_url can read one of them without asking: the search
+// chose that URL, and the model had no way to put data in it.
 import Anthropic from "@anthropic-ai/sdk";
 import type { Context } from "@earendil-works/chord";
-import { Type, type Usage } from "@earendil-works/pi-ai";
+import { type Message, Type, type Usage } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { signalOf } from "./approvals.ts";
 import { guard } from "./guards.ts";
-import { object, string } from "./parse.ts";
+import { array, attempt, object, string } from "./parse.ts";
 
 export type SearchResult = { title: string; url: string; age?: string };
 export type Searched = { results: SearchResult[]; notes: string; usage: Usage };
@@ -86,12 +88,20 @@ export function render(query: string, searched: Searched, owner = "the user"): s
 	].join("\n");
 }
 
+const Details = object({ urls: array(string) });
+
+/** The URLs web_search returned in `messages`, from its results' details, which only the tool writes. */
+export function searchedUrls(messages: readonly Message[]): string[] {
+	return messages.flatMap((m) => (m.role === "toolResult" && m.toolName === "web_search" ? (attempt(m.details ?? null, Details)?.urls ?? []) : []));
+}
+
 /** The web_search tool over `backend`, with its guard: it never asks, and what it returns is outside text. */
 export function createSearch(backend: SearchBackend, owner = "the user") {
 	const webSearch = defineTool({
 		name: "web_search",
 		description:
-			"Search the web and get back result titles, URLs and a short account of what they say. Use fetch_url to read a result in full.",
+			"Search the web and get back result titles, URLs and a short account of what they say. Use fetch_url to read a result in full; " +
+			"a URL this returned can be fetched without asking.",
 		parameters: Type.Object({ query: Type.String({ description: "What to search for, as you'd type it into a search engine" }) }),
 		replay: "safe",
 		execute: async (args, api, context: Context) => {

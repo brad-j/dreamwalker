@@ -35,15 +35,19 @@ export class SandboxCredentials {
 }
 
 /**
- * What the agent's sandbox may reach: the open internet, as Claude Code's and Codex's shells do. A sandbox keeps the
- * policy it was made with, so changing this means a new sandbox. What keeps it safe is what isn't there: none of the
- * server's secrets (the owner's token, the Gateway's credentials, the database) are given to it, and what its commands
- * print counts as outside text, so writing to memory or changing the schedule afterwards asks the owner.
+ * What the agent's sandbox may reach: nothing. The agent holds the owner's notes and conversation in its context, so
+ * a sandbox that reached the internet would let a page with hidden instructions have it send them anywhere, with no
+ * secret in the sandbox needed: the model carries them. An allowlist doesn't close that either, since a page can hand
+ * over its own token for GitHub or npm to push to. The internet is reached only through fetch_url, which asks about
+ * hosts the owner hasn't allowed.
+ *
+ * A sandbox keeps the policy it was made with, and the SDK doesn't compare policies when it finds a sandbox by name,
+ * so a changed policy needs a new name; the probe shows whether the network is reachable.
  */
-export const AGENT_NETWORK: NetworkPolicy = { egress: "allow_all" };
+export const AGENT_NETWORK: NetworkPolicy = { egress: "deny_all" };
 
-/** The agent's sandbox. */
-export const AGENT_SANDBOX = "dreamwalker-agent";
+/** The agent's sandbox. Never a name used before with another network policy (above). */
+export const AGENT_SANDBOX = "dreamwalker-workspace";
 
 /** The sandbox called `name`, made with `network` the first time. */
 export async function sandboxFor(credentials: SandboxCredentials, read: ReadEnv, name: string, network: NetworkPolicy = AGENT_NETWORK): Promise<Sandbox> {

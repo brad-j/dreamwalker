@@ -11,20 +11,24 @@ import type { DocumentReader, JsonObject, SessionDocToken } from "@earendil-work
 import type { ApprovalRequest } from "./approvals.ts";
 import { parse, type Parser } from "./parse.ts";
 
-/** What a call asks the owner. `detail` holds what the summary can't, so the owner sees all of what they allow. */
-export type Ask = Pick<ApprovalRequest, "summary" | "detail">;
+/** What a call asks the owner. `detail` holds what the summary can't, so the owner sees all of what they allow; `always` is the second button's wider grant. */
+export type Ask = Pick<ApprovalRequest, "summary" | "always" | "detail">;
 
 /** One of dreamwalker's session documents as it stands. */
 export type Snapshot = <T extends JsonObject>(doc: SessionDocToken<T>) => Promise<Readonly<T> | undefined>;
 
 /** What a guard can see when it decides whether a call asks. */
 export type Situation = {
+	/** Hosts the owner allowed for good. */
+	fetchHosts: readonly string[];
 	/** The conversation the call is in. */
 	conversationId: number;
 	/** The call's id, which its tool's execution sees as `api.callId`. */
 	callId: string;
 	/** The outside-text tools whose results are in the conversation's context. It reads the context, so call it only when it matters. */
 	outside: () => Promise<string[]>;
+	/** The URLs web_search returned in the conversation's context. It reads the context too. */
+	searched: () => Promise<string[]>;
 	snapshot: Snapshot;
 };
 

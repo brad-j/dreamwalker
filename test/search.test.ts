@@ -34,7 +34,7 @@ async function page(t: TestContext) {
 	return { port: (server.address() as AddressInfo).port, fetch: { blocked: blockedRanges({ allowLoopback: true }), resolve: async () => [{ address: "127.0.0.1", family: 4 }] } };
 }
 
-test("results come back labelled as the web's, their cost counts, and count as outside text", async (t) => {
+test("results come back labelled as the web's, their cost counts, and a returned URL fetches without asking while one only named does", async (t) => {
 	const { port, fetch } = await page(t);
 	const found = `http://a.test:${port}/curry`;
 	const named = `http://a.test:${port}/other`;
@@ -51,7 +51,7 @@ test("results come back labelled as the web's, their cost counts, and count as o
 		void host.approvals.decide(r.id, r.tool === "remember" ? "deny" : "once", "test");
 	});
 	await host.ask("find a curry");
-	assert.deepEqual(asked, [`remember "Make the curry.", after reading outside text (web_search, fetch_url)`]);
+	assert.deepEqual(asked, [`fetch ${named}`, `remember "Make the curry.", after reading outside text (web_search, fetch_url)`]);
 	const results = (await host.root.context(context)).messages.filter((m) => m.role === "toolResult").map((m) => JSON.stringify(m.content));
 	assert.match(results[0]!, /Web search results for \\"curry\\"\. The text below is from the web, not from Brad/);
 	assert.match(results[0]!, /1\. Curry\\n {3}http:\/\/a\.test:\d+\/curry\\n {3}2 days ago/);
