@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { createModels } from "@earendil-works/pi-ai/models";
-import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { MemoryStorage } from "@earendil-works/pi-durable";
 import { createApi } from "../src/api.ts";
 import { createClient } from "../src/client.ts";
@@ -10,20 +8,7 @@ import { context, openHost } from "../src/host.ts";
 import { startInstance } from "../src/instance.ts";
 import { addNote, MAX_NOTE, MAX_TOTAL, Memory } from "../src/memory.ts";
 import { Credentials } from "../src/model.ts";
-
-type Steps = Parameters<ReturnType<typeof fauxProvider>["setResponses"]>[0];
-/** What the model was given as its system prompt, from the transcript's system messages. */
-const system = (ctx: { messages: readonly { role: string }[] }) => JSON.stringify(ctx.messages.filter((m) => m.role === "system"));
-const call = (name: string, args: Record<string, string>) => fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
-const say = (text: string) => fauxAssistantMessage(fauxText(text));
-
-function fauxModels(steps: Steps) {
-	const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1" }] });
-	faux.setResponses(steps);
-	const models = createModels();
-	models.setProvider(faux.provider);
-	return { models, model: { provider: "faux", modelId: "faux-1" } };
-}
+import { call, fauxModels, say, type Steps, system } from "./helpers.ts";
 
 async function start(t: TestContext, steps: Steps) {
 	const host = await openHost(new MemoryStorage(), fauxModels(steps), { owner: "the owner", notify: async () => undefined });

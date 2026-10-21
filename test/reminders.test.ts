@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, test, type TestContext } from "node:test";
-import { createModels } from "@earendil-works/pi-ai/models";
-import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { type Conversation, MemoryStorage, type Storage } from "@earendil-works/pi-durable";
 import { NetlifyDB } from "@netlify/database-dev";
 import pg from "pg";
@@ -11,6 +10,7 @@ import { ntfyAdapter, ntfySettingsFrom } from "../src/ntfy.ts";
 import { ReminderFired, type Reminder, Reminders, soon } from "../src/reminders.ts";
 import { openDatabaseStorage } from "../src/storage/index.ts";
 import { setTimeZone, stamp, timeZone } from "../src/time.ts";
+import { fauxModels, until } from "./helpers.ts";
 
 const db = new NetlifyDB();
 let url = "";
@@ -19,14 +19,6 @@ before(async () => {
 	await db.applyMigrations("netlify/database/migrations");
 });
 after(() => db.stop());
-
-function fauxModels(steps: Parameters<ReturnType<typeof fauxProvider>["setResponses"]>[0] = []) {
-	const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1" }] });
-	faux.setResponses(steps);
-	const models = createModels();
-	models.setProvider(faux.provider);
-	return { models, model: { provider: "faux", modelId: "faux-1" } };
-}
 
 /** A way to reach the owner that keeps the reminders it's sent, failing the first `failFirst`. */
 function recorder(failFirst = 0) {
@@ -46,14 +38,6 @@ function recorder(failFirst = 0) {
 		},
 	};
 	return { sent, adapters };
-}
-
-async function until(check: () => boolean | Promise<boolean>, timeoutMs = 10_000) {
-	const end = Date.now() + timeoutMs;
-	while (!(await check())) {
-		if (Date.now() > end) throw new Error("timed out");
-		await new Promise((r) => setTimeout(r, 50));
-	}
 }
 
 async function firedEntries(root: Conversation) {

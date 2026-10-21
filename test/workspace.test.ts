@@ -3,26 +3,16 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { createModels } from "@earendil-works/pi-ai/models";
-import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { MemoryStorage } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { context, openHost } from "../src/host.ts";
 import { Memory } from "../src/memory.ts";
-
-type Steps = Parameters<ReturnType<typeof fauxProvider>["setResponses"]>[0];
-const call = (name: string, args: Record<string, string>) => fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
-const say = (text: string) => fauxAssistantMessage(fauxText(text));
-const system = (ctx: { messages: readonly { role: string }[] }) => JSON.stringify(ctx.messages.filter((m) => m.role === "system"));
+import { call, fauxModels, say, type Steps, system } from "./helpers.ts";
 
 async function start(t: TestContext, steps: Steps) {
 	const dir = await mkdtemp(join(tmpdir(), "dreamwalker-workspace-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
-	const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1" }] });
-	faux.setResponses(steps);
-	const models = createModels();
-	models.setProvider(faux.provider);
-	const host = await openHost(new MemoryStorage(), { models, model: { provider: "faux", modelId: "faux-1" } }, {
+	const host = await openHost(new MemoryStorage(), fauxModels(steps), {
 		owner: "the owner",
 		notify: async () => undefined,
 		workspace: () => new NodeExecutionEnv({ cwd: dir }),

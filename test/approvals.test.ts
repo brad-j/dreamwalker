@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test, type TestContext } from "node:test";
-import { createModels } from "@earendil-works/pi-ai/models";
-import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { MemoryStorage, type Storage } from "@earendil-works/pi-durable";
 import { NetlifyDB } from "@netlify/database-dev";
 import pg from "pg";
@@ -17,8 +16,7 @@ import { startInstance } from "../src/instance.ts";
 import { createMemory, Memory } from "../src/memory.ts";
 import { Credentials } from "../src/model.ts";
 import { openDatabaseStorage } from "../src/storage/index.ts";
-
-type Steps = Parameters<ReturnType<typeof fauxProvider>["setResponses"]>[0];
+import { call, fauxModels, say, type Steps, until } from "./helpers.ts";
 
 const db = new NetlifyDB();
 let url = "";
@@ -42,29 +40,8 @@ async function site(t: TestContext): Promise<{ port: number; fetch: FetchOptions
 	};
 }
 
-const call = (name: string, args: Record<string, string>) => fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
-const say = (text: string) => fauxAssistantMessage(fauxText(text));
-
-function fauxModels(steps: Steps) {
-	const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1" }] });
-	faux.setResponses(steps);
-	const m = createModels();
-	m.setProvider(faux.provider);
-	return { models: m, model: { provider: "faux", modelId: "faux-1" } };
-}
-
 /** Each round fetches the given host, then answers. */
 const fetchRounds = (port: number, hosts: string[]): Steps => hosts.flatMap((h) => [call("fetch_url", { url: `http://${h}:${port}/` }), say("Done.")]);
-
-async function until<T>(get: () => Promise<T | undefined>, timeoutMs = 10_000): Promise<T> {
-	const end = Date.now() + timeoutMs;
-	for (;;) {
-		const value = await get();
-		if (value !== undefined) return value;
-		if (Date.now() > end) throw new Error("timed out");
-		await new Promise((r) => setTimeout(r, 20));
-	}
-}
 
 const nextPending = (approvals: ApprovalService, count = 1) =>
 	until(async () => {
@@ -78,12 +55,12 @@ async function results(host: Awaited<ReturnType<typeof openHost>>) {
 
 async function start(t: TestContext, steps: (port: number) => Steps, extra: Partial<HostOptions> = {}, storage: Storage = new MemoryStorage()) {
 	const { port, fetch } = await site(t);
-	const host = await openHost(storage, fauxModels(steps(port)), { owner: "Brad", fetch, notify: async () => undefined, ...extra });
+	const host = await openHost(storage, fauxModels(steps(port)), { owner: "the owner", fetch, notify: async () => undefined, ...extra });
 	t.after(() => host.close());
 	return { host, port };
 }
 
-test("a fetch to a new host waits for Brad; once allows that call, always allows the host", async (t) => {
+test("a fetch to a new host waits for the owner; once allows that call, always allows the host", async (t) => {
 	const { host } = await start(t, (port) => fetchRounds(port, ["a.test", "a.test", "a.test"]));
 	const seen: ApprovalRequest[] = [];
 	host.approvals.onChange((r) => void seen.push(r));
@@ -116,13 +93,13 @@ test("a denied fetch is blocked, and the model is told why", async (t) => {
 	const [request] = await nextPending(host.approvals);
 	await host.approvals.decide(request!.id, "deny", "test");
 	await run;
-	assert.match((await results(host))[0]!, /blocked: Needs Brad's approval to fetch http:\/\/a\.test:\d+\/, and Brad said no/);
+	assert.match((await results(host))[0]!, /blocked: Needs the owner's approval to fetch http:\/\/a\.test:\d+\/, and the owner said no/);
 });
 
 test("no answer in time blocks the call", async (t) => {
 	const { host } = await start(t, (port) => fetchRounds(port, ["a.test"]), { approvalTimeoutMs: 300 });
 	await host.ask("go");
-	assert.match((await results(host))[0]!, /Brad didn't answer in time/);
+	assert.match((await results(host))[0]!, /the owner didn't answer in time/);
 	const [request] = Object.values((await host.approvals.state()).requests);
 	assert.equal(request!.status, "expired");
 });
@@ -143,10 +120,10 @@ test("a new message instead of an answer closes the request, and the run goes on
 	assert.equal(await host.send("never mind, something else"), false);
 	await until(async () => ((await host.approvals.state()).requests[request!.id]!.status === "superseded" ? true : undefined));
 	await until(async () => ((await host.busy()) ? undefined : true));
-	assert.match((await results(host))[0]!, /Brad sent a new message instead of answering/);
+	assert.match((await results(host))[0]!, /the owner sent a new message instead of answering/);
 });
 
-test("a question waits for Brad, and his next message is its answer", async (t) => {
+test("a question waits for the owner, and their next message is its answer", async (t) => {
 	let answered = "";
 	const { host } = await start(t, () => [
 		fauxAssistantMessage(fauxToolCall("ask_owner", { question: "Which day?", choices: ["Monday", "Friday"] }), { stopReason: "toolUse" }),
@@ -160,7 +137,7 @@ test("a question waits for Brad, and his next message is its answer", async (t) 
 	assert.deepEqual([question!.kind, question!.summary, question!.choices], ["question", "Which day?", ["Monday", "Friday"]]);
 	assert.equal(await host.send("Friday", undefined, "web"), true);
 	assert.deepEqual(await run, { ok: true, text: "Friday it is." });
-	assert.match(answered, /Brad answered: Friday/);
+	assert.match(answered, /the owner answered: Friday/);
 	assert.equal(await host.approvals.decide(question!.id, "once", "test"), undefined, "a question isn't allowed or denied");
 });
 
@@ -242,7 +219,7 @@ test("the API lists requests and decides them, and the transcript records how ea
 });
 
 test("a call whose arguments its guard can't read is asked about, showing all of them, not let through", async () => {
-	const guards = [...createFetch().guards, ...createMemory("Brad").guards];
+	const guards = [...createFetch().guards, ...createMemory("the owner").guards];
 	const situation: Situation = { fetchHosts: [], conversationId: 1, callId: "c1", outside: async () => ["fetch_url"], searched: async () => [], snapshot: async () => undefined };
 	const ask = (name: string, args: Record<string, string | number | string[]>) => askFor(guards.find((g) => g.tool === name)!, { type: "toolCall", id: "c1", name, arguments: args }, situation);
 	assert.match((await ask("fetch_url", { url: ["https://a.example/"] }))!.summary, /^fetch_url with arguments that don't read right/);

@@ -5,7 +5,7 @@
 // in this instance's memory: it's a check to look at, not state.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { createEnvConformance } from "@earendil-works/pi-durable/testing";
+import { createEnvConformance, type EnvConformanceAssertions, type EnvConformanceCase, type EnvConformanceProvider } from "@earendil-works/pi-durable/testing";
 import { type Box, SandboxEnv } from "./sandbox-env.ts";
 
 export type CheckRun = {
@@ -21,34 +21,45 @@ export type CheckRun = {
 
 const CASE_TIMEOUT_MS = 60_000;
 
-/** Runs the conformance cases in the sandbox reached through `box`, under `scratch`, one run at a time. */
-export function sandboxCheck(options: { id: string; root: string; box: () => Promise<Box>; scratch: string }) {
+/** Pi Durable's conformance assertions on node:assert, for this check and for the tests' runs of the same suites. */
+export const nodeAssertions: EnvConformanceAssertions = {
+	ok: (value, message) => (message === undefined ? assert.ok(value) : assert.ok(value, message)),
+	strictEqual: (actual, expected) => assert.strictEqual(actual, expected),
+	deepEqual: (actual, expected) => assert.deepStrictEqual(actual, expected),
+	partialDeepEqual: (actual, expected) => assert.partialDeepStrictEqual(actual, expected),
+	greaterThan: (actual, expected) => assert.ok(actual > expected, `${actual} > ${expected}`),
+	rejects: (operation, messageIncludes) => assert.rejects(operation, (error: Error) => error.message.includes(messageIncludes)),
+};
+
+const conformance = (withEnv: EnvConformanceProvider) => createEnvConformance({ assertions: nodeAssertions, withEnv });
+
+/**
+ * Runs the conformance cases in the sandbox reached through `box`, under `scratch`, one run at a time. `cases` makes
+ * them from an environment provider; tests give it a few of their own instead of the whole suite.
+ */
+export function sandboxCheck(options: {
+	id: string;
+	root: string;
+	box: () => Promise<Box>;
+	scratch: string;
+	cases?: (withEnv: EnvConformanceProvider) => readonly EnvConformanceCase[];
+}) {
 	let current: CheckRun | undefined;
 
 	async function run(check: CheckRun) {
 		const base = `${options.scratch}/${check.id}`;
 		let n = 0;
-		const cases = createEnvConformance({
-			assertions: {
-				ok: (value, message) => (message === undefined ? assert.ok(value) : assert.ok(value, message)),
-				strictEqual: (actual, expected) => assert.strictEqual(actual, expected),
-				deepEqual: (actual, expected) => assert.deepStrictEqual(actual, expected),
-				partialDeepEqual: (actual, expected) => assert.partialDeepStrictEqual(actual, expected),
-				greaterThan: (actual, expected) => assert.ok(actual > expected, `${actual} > ${expected}`),
-				rejects: (operation, messageIncludes) => assert.rejects(operation, (error: Error) => error.message.includes(messageIncludes)),
-			},
-			withEnv: async (use) => {
-				n += 1;
-				const cwd = `${base}/${n}`;
-				const made = await (await options.box()).run(["mkdir", "-p", cwd]);
-				if (made.exitCode !== 0) throw new Error(`Couldn't make ${cwd}: ${made.stderr.trim()}`);
-				const env = new SandboxEnv({ id: options.id, cwd, root: options.root, box: options.box });
-				try {
-					await use(env);
-				} finally {
-					await env.cleanup();
-				}
-			},
+		const cases = (options.cases ?? conformance)(async (use) => {
+			n += 1;
+			const cwd = `${base}/${n}`;
+			const made = await (await options.box()).run(["mkdir", "-p", cwd]);
+			if (made.exitCode !== 0) throw new Error(`Couldn't make ${cwd}: ${made.stderr.trim()}`);
+			const env = new SandboxEnv({ id: options.id, cwd, root: options.root, box: options.box });
+			try {
+				await use(env);
+			} finally {
+				await env.cleanup();
+			}
 		});
 		check.total = cases.length;
 		for (const c of cases) {

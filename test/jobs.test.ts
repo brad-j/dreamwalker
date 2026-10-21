@@ -13,8 +13,7 @@ import { Credentials } from "../src/model.ts";
 import type { Adapters } from "../src/notifications.ts";
 import { setTimeZone, timeZone } from "../src/time.ts";
 import { conversationId } from "../src/ids.ts";
-
-type Steps = Parameters<ReturnType<typeof fauxProvider>["setResponses"]>[0];
+import { type Steps, until } from "./helpers.ts";
 
 /** A way to reach the owner that hands each job report it's sent to `handle`. */
 const reporting = (handle: (report: Report) => void): Adapters => ({
@@ -32,16 +31,6 @@ function faux(steps: Steps) {
 	const models = createModels();
 	models.setProvider(provider.provider);
 	return { models, model: { provider: "faux", modelId: "faux-1" } };
-}
-
-async function until<T>(get: () => Promise<T | undefined> | T | undefined, timeoutMs = 10_000): Promise<T> {
-	const end = Date.now() + timeoutMs;
-	for (;;) {
-		const value = await get();
-		if (value !== undefined) return value;
-		if (Date.now() > end) throw new Error("timed out");
-		await new Promise((r) => setTimeout(r, 20));
-	}
 }
 
 /** dreamwalker with every approval granted and reports collected. */
@@ -208,7 +197,7 @@ test("a job that runs too often or has no room is refused before asking", async 
 });
 
 test("every new job asks, showing the whole instruction, and cancelling asks after outside text", async () => {
-	const { guards } = createJobs({ deliver: async () => undefined, owner: "Brad" });
+	const { guards } = createJobs({ deliver: async () => undefined, owner: "the owner" });
 	const situation = (outside: string[]): Situation => ({ fetchHosts: [], conversationId: 1, callId: "c1", outside: async () => outside, searched: async () => [], snapshot: async () => ({ items: [{ taskId: 7, title: "Backups" }] }) as never });
 	const schedule = guards.find((g) => g.tool === "schedule_job")!;
 	const long = "y".repeat(2000);

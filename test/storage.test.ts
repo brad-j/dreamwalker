@@ -11,6 +11,7 @@ import { envFrom } from "../src/environment.ts";
 import { context, openHost } from "../src/host.ts";
 import { startInstance } from "../src/instance.ts";
 import { Credentials, modelFor } from "../src/model.ts";
+import { nodeAssertions } from "../src/sandbox-check.ts";
 import { holderFor, openDatabaseStorage } from "../src/storage/index.ts";
 import { LeaseLost } from "../src/storage/lease.ts";
 import { PostgresDatabase, toPostgres } from "../src/storage/postgres.ts";
@@ -36,14 +37,7 @@ async function reset() {
 
 describe("Pi Durable's storage conformance on Netlify Database", () => {
 	const cases = createStorageConformance({
-		assertions: {
-			ok: (value, message) => (message === undefined ? assert.ok(value) : assert.ok(value, message)),
-			strictEqual: (actual, expected) => assert.strictEqual(actual, expected),
-			deepEqual: (actual, expected) => assert.deepStrictEqual(actual, expected),
-			partialDeepEqual: (actual, expected) => assert.partialDeepStrictEqual(actual, expected),
-			greaterThan: (actual, expected) => assert.ok(actual > expected, `${actual} > ${expected}`),
-			rejects: (operation, messageIncludes) => assert.rejects(operation, (error: Error) => error.message.includes(messageIncludes)),
-		},
+		assertions: nodeAssertions,
 		withStorage: async (use) => {
 			await reset();
 			const storage = await openDatabaseStorage({ connectionString });

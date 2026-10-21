@@ -8,7 +8,7 @@
 import { type Config, getContext, onShutdown } from "@netlify/server";
 import { createApi } from "../../src/api.ts";
 import { budgetSettingsFrom } from "../../src/budget.ts";
-import { platformEnv, platformNames, Remembered } from "../../src/environment.ts";
+import { platformEnv, Remembered } from "../../src/environment.ts";
 import { memoryStorage, startInstance } from "../../src/instance.ts";
 import { Credentials, modelFor, modelSettingsFrom } from "../../src/model.ts";
 import { ntfyAdapter, ntfySettingsFrom } from "../../src/ntfy.ts";
@@ -68,7 +68,6 @@ onShutdown(() => instance.close());
 export const shutdown = () => instance.close();
 
 const startedAt = new Date().toISOString();
-const variablesAtStartup = platformNames();
 
 export default createApi(instance, {
 	token: process.env.DREAMWALKER_TOKEN || undefined,
@@ -88,12 +87,7 @@ export default createApi(instance, {
 	deploy: requestDeploy,
 	describe: () => ({
 		startedAt,
-		deployId: platformEnv("DEPLOY_ID"),
-		instanceDeployId: deployId,
-		requestDeployId: requestDeploy()?.id,
-		requestDeployContext: requestDeploy()?.context,
-		requestDeployPublished: requestDeploy()?.published,
-		context: platformEnv("CONTEXT"),
+		deployId,
 		storageKind: memory ? "memory" : "Netlify Database",
 		databaseUrlAgeSeconds: databaseUrl.age(),
 		sandboxCredentialsAgeSeconds: sandboxCredentials.age(),
@@ -101,6 +95,5 @@ export default createApi(instance, {
 		timeZone: budget.timeZone,
 		modelId: settings.provider === "faux" ? "faux" : settings.id,
 		notifications: ntfy === undefined ? "none: NTFY_URL isn't set, so reminders go to the log" : "ntfy",
-		variablesAtStartup,
 	}),
 });

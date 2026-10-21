@@ -61,19 +61,6 @@ export function attempt<T>(value: Input, parser: Parser<T>): T | undefined {
 	}
 }
 
-/** A string, integer or boolean as a header or a label carries it: as text. */
-export const scalar: Parser<string> = (value, at) => {
-	if (typeof value === "string") return value;
-	if ((typeof value === "number" && Number.isSafeInteger(value)) || typeof value === "boolean") return String(value);
-	throw fail(at, "a string, integer or boolean");
-};
-
-/** Any JSON object, as it is. */
-export const jsonObject: Parser<{ readonly [key: string]: Json }> = (value, at) => {
-	if (!isObject(value)) throw fail(at, "an object");
-	return value;
-};
-
 /** One of the given strings. */
 export function literal<const T extends string>(...values: readonly T[]): Parser<T> {
 	return (value, at) => {
@@ -88,23 +75,10 @@ export function optional<T>(parser: Parser<T>): Parser<T | undefined> {
 	return (value, at) => (value === undefined || value === null ? undefined : parser(value, at));
 }
 
-/** Absent or null as null, and anything else as `parser` has it. */
-export function nullable<T>(parser: Parser<T>): Parser<T | null> {
-	return (value, at) => (value === undefined || value === null ? null : parser(value, at));
-}
-
 export function array<T>(item: Parser<T>): Parser<T[]> {
 	return (value, at) => {
 		if (!Array.isArray(value)) throw fail(at, "a list");
 		return value.map((v, i) => item(v, `${at}[${i}]`));
-	};
-}
-
-/** An object used as a map from names to values. */
-export function dictionary<T>(item: Parser<T>): Parser<Map<string, T>> {
-	return (value, at) => {
-		if (!isObject(value)) throw fail(at, "an object");
-		return new Map(Object.entries(value).map(([key, v]) => [key, item(v, `${at}.${key}`)]));
 	};
 }
 

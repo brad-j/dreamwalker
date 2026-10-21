@@ -11,6 +11,7 @@ A personal agent for one person on Pi Durable, built for Netlify Server: the pla
 - Deploy by pushing to `main`; Netlify builds it. Not `netlify deploy`: from the CLI, new migrations are uploaded but not applied.
 - `netlify database migrations apply` (while `pnpm dev` runs) applies new migrations to the local database. Deploys apply them themselves.
 - Tests run on Pi Durable's faux provider and an in-process Postgres (`@netlify/database-dev`) with the migrations applied. Don't add a test that needs a key or the network.
+- `test/helpers.ts` has what the tests share: the faux model scripted step by step (`fauxModels`, `call`, `say`), the system prompt it was sent (`system`), and `until`. Pi Durable's conformance suites use `nodeAssertions` from `src/sandbox-check.ts`.
 
 ## Where things are
 
@@ -33,3 +34,6 @@ A personal agent for one person on Pi Durable, built for Netlify Server: the pla
 ## Mistakes agents have made
 
 Add a line here each time an agent gets something wrong that a line here would have prevented.
+
+- An agent opened the sandbox to the internet and stopped fetch_url asking, citing what Claude Code and Codex were said to do, and both do keep a gate. Before loosening a safety gate, check the claim, and say what the agent could then send where: it holds the owner's notes and conversation.
+- A sandbox keeps the network policy it was made with, and the SDK doesn't compare policies when it finds a sandbox by name. Changing `AGENT_NETWORK` under the same name changes nothing; it needs a new name, and the probe shows what the network reaches.

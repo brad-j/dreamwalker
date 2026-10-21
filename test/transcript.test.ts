@@ -1,20 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createModels } from "@earendil-works/pi-ai/models";
-import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { MemoryStorage } from "@earendil-works/pi-durable";
 import { createApi } from "../src/api.ts";
 import { envFrom } from "../src/environment.ts";
 import { startInstance } from "../src/instance.ts";
 import { Credentials } from "../src/model.ts";
-
-function fauxModels(steps: Parameters<ReturnType<typeof fauxProvider>["setResponses"]>[0]) {
-	const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1" }] });
-	faux.setResponses(steps);
-	const models = createModels();
-	models.setProvider(faux.provider);
-	return { models, model: { provider: "faux", modelId: "faux-1" } };
-}
+import { fauxModels } from "./helpers.ts";
 
 test("the transcript has the owner's words without the stamp, tool calls with their results, and answers; reminders list and cancel", async (t) => {
 	const instance = startInstance(

@@ -4,11 +4,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
-import { createEnvConformance } from "@earendil-works/pi-durable/testing";
+import { createEnvConformance, type EnvConformanceCase, type EnvConformanceProvider } from "@earendil-works/pi-durable/testing";
 import { render, sandboxFiles } from "../scripts/sandbox-files.ts";
 import { context } from "../src/host.ts";
 import { AGENT_NETWORK } from "../src/sandbox.ts";
-import { sandboxCheck } from "../src/sandbox-check.ts";
+import { nodeAssertions, sandboxCheck } from "../src/sandbox-check.ts";
 import { type Box, type BoxProcess, SandboxEnv } from "../src/sandbox-env.ts";
 import { SANDBOX_FILES } from "../src/sandbox-files.ts";
 
@@ -78,14 +78,7 @@ describe("Pi Durable's environment conformance on a sandbox", () => {
 	const box = localBox();
 	let n = 0;
 	const cases = createEnvConformance({
-		assertions: {
-			ok: (value, message) => (message === undefined ? assert.ok(value) : assert.ok(value, message)),
-			strictEqual: (actual, expected) => assert.strictEqual(actual, expected),
-			deepEqual: (actual, expected) => assert.deepStrictEqual(actual, expected),
-			partialDeepEqual: (actual, expected) => assert.partialDeepStrictEqual(actual, expected),
-			greaterThan: (actual, expected) => assert.ok(actual > expected, `${actual} > ${expected}`),
-			rejects: (operation, messageIncludes) => assert.rejects(operation, (error: Error) => error.message.includes(messageIncludes)),
-		},
+		assertions: nodeAssertions,
 		withEnv: async (use) => {
 			n += 1;
 			const cwd = join(dir, `work-${n}`);
@@ -145,17 +138,25 @@ describe("the sandbox environment", () => {
 		assert.equal(ran.ok, false);
 	});
 
-	test("the server's check runs every conformance case in the background, one run at a time, and clears up after", async () => {
+	test("the server's check runs its cases in the background, one run at a time, each in its own directory, and clears up after", async () => {
 		const box = localBox();
 		const scratch = join(dir, "check");
-		const check = sandboxCheck({ id: `local:${dir}`, root: join(dir, ".dreamwalker"), box: async () => box, scratch });
+		const cases = (withEnv: EnvConformanceProvider): EnvConformanceCase[] => [
+			{ name: "writes", run: () => withEnv(async (env) => assert.equal((await env.writeFile("a.txt", "a", context)).ok, true)) },
+			{ name: "starts empty", run: () => withEnv(async (env) => assert.deepEqual(await env.exists("a.txt", context), { ok: true, value: false })) },
+			{ name: "fails", run: async () => assert.fail("as it should") },
+		];
+		const check = sandboxCheck({ id: `local:${dir}`, root: join(dir, ".dreamwalker"), box: async () => box, scratch, cases });
+		const finished = async () => {
+			while (check.latest()?.finishedAt === undefined) await new Promise((resolve) => setTimeout(resolve, 20));
+		};
 		const run = check.start();
 		assert.equal(check.start(), run);
-		while (check.latest()?.finishedAt === undefined) await new Promise((resolve) => setTimeout(resolve, 100));
-		assert.deepEqual(run.failed, []);
-		assert.ok(run.total > 20);
-		assert.equal(run.passed, run.total);
+		await finished();
+		assert.deepEqual([run.total, run.passed, run.failed], [3, 2, [{ name: "fails", error: "as it should" }]]);
 		const left = await new SandboxEnv({ id: `local:${dir}`, cwd: dir, root: join(dir, ".dreamwalker"), box: async () => box }).listDir(scratch, context);
-		assert.deepEqual(left.ok && left.value, []);
+		assert.deepEqual(left.ok && left.value.length, 0);
+		assert.notEqual(check.start(), run, "a finished run makes way for a new one");
+		await finished();
 	});
 });

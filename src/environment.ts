@@ -6,7 +6,7 @@
 /** A variable as the platform shows it right now. */
 export type ReadEnv = (name: string) => string | undefined;
 
-type NetlifyGlobal = { env: { get(name: string): string | undefined; toObject?(): Record<string, string> } };
+type NetlifyGlobal = { env: { get(name: string): string | undefined } };
 
 function netlifyGlobal(): NetlifyGlobal | undefined {
 	// SAFETY: the Netlify runtimes define `Netlify` with this shape; elsewhere it's absent.
@@ -21,18 +21,6 @@ export const envFrom =
 	(env: Partial<Record<string, string>>): ReadEnv =>
 	(name) =>
 		env[name] || undefined;
-
-/** Names of variables in sight, by where they were seen. */
-export type VariableNames = { process: string[]; netlify: string[] };
-
-/** The names, never the values, of the platform's variables in sight now: what the status route reports. */
-export function platformNames(): VariableNames {
-	const interesting = (name: string) => /^(NETLIFY_|ANTHROPIC_|DEPLOY_|CONTEXT$|SITE_|URL$)/.test(name);
-	return {
-		process: Object.keys(process.env).filter(interesting).sort(),
-		netlify: Object.keys(netlifyGlobal()?.env.toObject?.() ?? {}).filter(interesting).sort(),
-	};
-}
 
 /** The newest value seen of one variable. */
 export class Remembered {

@@ -4,7 +4,7 @@
 // Without a token set, they're refused, except under `netlify dev`.
 
 import { createHash, timingSafeEqual } from "node:crypto";
-import { platformNames, type ReadEnv, type VariableNames } from "./environment.ts";
+import type { ReadEnv } from "./environment.ts";
 import type { Instance } from "./instance.ts";
 import type { Credentials } from "./model.ts";
 import { addNote, forgetNote, MAX_NOTE, MAX_TOTAL, Memory, noteId, noteProblem, updateNote } from "./memory.ts";
@@ -48,7 +48,7 @@ export type ApiOptions = {
 	/** The deploy the request being handled reached; undefined where there's no request context, as in tests. */
 	deploy?: () => RequestDeploy | undefined;
 	/** What the status route reports about the instance. */
-	describe: () => Record<string, string | number | boolean | undefined | VariableNames>;
+	describe: () => Record<string, string | number | boolean | undefined>;
 };
 
 const digest = (text: string) => createHash("sha256").update(text).digest();
@@ -106,7 +106,7 @@ export function createApi(instance: Instance, options: ApiOptions) {
 				(host) => host?.budget.status(),
 				() => undefined,
 			);
-			return Response.json({ ...options.describe(), storage, budget, model: options.credentials.describe(options.env), variablesNow: platformNames() });
+			return Response.json({ ...options.describe(), storage, budget, model: options.credentials.describe(options.env) });
 		}
 		if (url.pathname === "/api/sandbox/probe" && request.method === "POST") {
 			if (options.probe === undefined) return Response.json({ error: "No sandboxes here" }, { status: 404 });

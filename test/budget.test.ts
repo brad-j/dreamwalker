@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
-import { createModels } from "@earendil-works/pi-ai/models";
-import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { MemoryStorage } from "@earendil-works/pi-durable";
 import { createApi } from "../src/api.ts";
 import { Budget, budgetSettingsFrom, type Limits } from "../src/budget.ts";
@@ -9,20 +7,13 @@ import { envFrom } from "../src/environment.ts";
 import { context, openHost } from "../src/host.ts";
 import { startInstance } from "../src/instance.ts";
 import { Credentials } from "../src/model.ts";
-
-const fauxModels = () => {
-	const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1" }] });
-	faux.setResponses(Array.from({ length: 20 }, () => fauxAssistantMessage(fauxText("ok"))));
-	const models = createModels();
-	models.setProvider(faux.provider);
-	return { models, model: { provider: "faux", modelId: "faux-1" } };
-};
+import { fauxModels, say } from "./helpers.ts";
 
 /** dreamwalker whose spend total is `spent.value`, with what it tells the owner collected. */
 async function start(t: TestContext, limits: Limits = { daily: 5, monthly: 0 }) {
 	const spent = { value: 0 };
 	const told: string[] = [];
-	const host = await openHost(new MemoryStorage(), fauxModels(), {
+	const host = await openHost(new MemoryStorage(), fauxModels(Array.from({ length: 20 }, () => say("ok"))), {
 		budget: { limits, timeZone: "UTC" },
 		notify: async (text) => void told.push(text),
 		spend: async () => spent.value,
@@ -102,7 +93,7 @@ test("the monthly limit holds across days", async (t) => {
 
 test("the API shows the budget and allows more", async (t) => {
 	const spent = { value: 0 };
-	const instance = startInstance(async () => new MemoryStorage(), fauxModels(), { budget: { limits: { daily: 5, monthly: 0 }, timeZone: "UTC" }, notify: async () => undefined, spend: async () => spent.value });
+	const instance = startInstance(async () => new MemoryStorage(), fauxModels(Array.from({ length: 20 }, () => say("ok"))), { budget: { limits: { daily: 5, monthly: 0 }, timeZone: "UTC" }, notify: async () => undefined, spend: async () => spent.value });
 	t.after(() => instance.close());
 	const credentials = new Credentials();
 	const api = createApi(instance, { token: "owner-token", local: false, env: envFrom({}), see: () => undefined, credentials, describe: () => ({}) });
@@ -132,7 +123,7 @@ test("budget settings come from the environment and are checked", () => {
 test("a refresh still running at shutdown ends with the last status instead of an error", async () => {
 	// Slow enough that the Harness closes while the refresh waits for the total.
 	const spend = async () => new Promise<number>((resolve) => setTimeout(() => resolve(1), 100));
-	const host = await openHost(new MemoryStorage(), fauxModels(), { spend, notify: async () => undefined });
+	const host = await openHost(new MemoryStorage(), fauxModels(Array.from({ length: 20 }, () => say("ok"))), { spend, notify: async () => undefined });
 	const before = host.budget.status();
 	const pending = host.budget.refresh();
 	await host.close();

@@ -77,7 +77,6 @@ test("status describes the instance and the model's credentials, never the key",
 	assert.equal(status.storageKind, "memory");
 	assert.equal(status.storage, "open");
 	assert.deepEqual(status.model, { credentials: "the AI Gateway", baseHost: "gateway.example.com", ageSeconds: 0 });
-	assert.ok(Array.isArray(status.variablesNow.process));
 });
 
 test("unknown paths are not found", async () => {
