@@ -15,6 +15,9 @@ export const TAILSCALE_NETWORK: NetworkPolicy = { egress: "allowlist", allow: ["
 /** The sandboxes that get it, by name. */
 export const isTailscaleSandbox = (name: string) => name.startsWith("dreamwalker-tailscale");
 
+/** For the experiment only: one named `...-open` reaches the whole internet, to tell the allowlist's part from the sandbox's. */
+export const tailscaleNetwork = (name: string): NetworkPolicy => (name.endsWith("-open") ? { egress: "allow_all" } : TAILSCALE_NETWORK);
+
 const CHECK = `
 cd /root
 echo "--- download"
@@ -26,6 +29,11 @@ if [ ! -x tailscale/tailscaled ]; then
 	mkdir -p tailscale && tar xzf ts.tgz -C tailscale --strip-components=1 && rm ts.tgz
 fi
 ./tailscale/tailscale version | head -1
+echo "--- plain requests"
+for u in "https://controlplane.tailscale.com/key?v=88" "http://controlplane.tailscale.com/key?v=88" "https://derp1.tailscale.com/derp/probe"; do printf '%s %s\n' "$(curl -sS -m 10 -o /dev/null -w '%{http_code}' "$u" 2>&1)" "$u"; done
+curl -sv -m 10 -o /dev/null https://controlplane.tailscale.com/ 2>&1 | grep -iE "issuer|subject:|SSL connection" | head -3
+echo "--- an upgrade, as Tailscale's control protocol makes"
+curl -sS -m 10 -o /dev/null -w '%{http_code}\n' -H "Connection: upgrade" -H "Upgrade: tailscale-control-protocol" -X POST "https://controlplane.tailscale.com/ts2021" 2>&1
 echo "--- tailscaled"
 mkdir -p /root/ts
 pkill tailscaled 2>/dev/null
