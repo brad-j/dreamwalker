@@ -120,7 +120,7 @@ const aborted = <T>(path?: string) => err<T, FileError>(new FileError("aborted",
 const closed = <T>(what: string, path: string) => err<T, FileError>(new FileError("invalid", `${what} is closed`, path));
 const failed = <T>(cause: unknown, path?: string) => err<T, FileError>(new FileError("unknown", cause instanceof Error ? cause.message : String(cause), path, cause instanceof Error ? cause : undefined));
 
-/** Installs reached by this process, by sandbox and version, so each sandbox is checked once. */
+/** Installs reached by this process, by sandbox, version and working directory, so each is checked once. */
 const installs = new Map<string, Promise<void>>();
 
 /** Arguments longer than this are staged in files first: Linux takes at most 128 KiB in one. */
@@ -166,7 +166,7 @@ export class SandboxEnv implements ExecutionEnv {
 			if (this.#boxed === boxed) this.#boxed = undefined;
 		});
 		const box = await boxed;
-		const key = `${this.id}:${this.#dir}`;
+		const key = `${this.id}:${this.#dir}:${this.cwd}`;
 		let install = installs.get(key);
 		if (install === undefined) {
 			install = this.#install(box);
@@ -177,11 +177,12 @@ export class SandboxEnv implements ExecutionEnv {
 		return box;
 	}
 
+	/** Makes the working directory, and installs the helper unless it answers already. */
 	async #install(box: Box): Promise<void> {
+		const made = await box.run(["mkdir", "-p", `${this.#dir}/env`, this.cwd]);
+		if (made.exitCode !== 0) throw new Error(`Couldn't make the helper's and the working directory in the sandbox: ${made.stderr.trim()}`);
 		const ping = await box.run(["node", `${this.#dir}/helper.mjs`, this.#arg({ op: "ping" })]).catch(() => undefined);
 		if (ping !== undefined && ping.stdout.includes('"pong"')) return;
-		const made = await box.run(["mkdir", "-p", `${this.#dir}/env`, this.cwd]);
-		if (made.exitCode !== 0) throw new Error(`Couldn't make the helper's directory in the sandbox: ${made.stderr.trim()}`);
 		for (const [path, contents] of Object.entries(SANDBOX_FILES)) await box.writeFile(`${this.#dir}/${path}`, contents);
 		const check = await box.run(["node", `${this.#dir}/helper.mjs`, this.#arg({ op: "ping" })]);
 		if (!check.stdout.includes('"pong"')) throw new Error(`The helper doesn't run in the sandbox: ${(check.stderr || check.stdout).trim()}`);

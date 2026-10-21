@@ -108,6 +108,16 @@ describe("the sandbox environment", () => {
 		assert.equal(box.runs.filter((argv) => argv[0] === "mkdir").length, 1);
 	});
 
+	test("a working directory that doesn't exist yet is made, even where the helper is installed already", async () => {
+		const box = localBox();
+		const root = join(dir, "cwd");
+		const first = new SandboxEnv({ id: `local:${root}`, cwd: join(root, "one"), root, box: async () => box });
+		assert.equal((await first.writeFile("a.txt", "a", context)).ok, true);
+		const second = new SandboxEnv({ id: `local:${root}`, cwd: join(root, "two"), root, box: async () => box });
+		const ran = await second.exec("pwd", undefined, context);
+		assert.equal(ran.ok && ran.value.exitCode, 0);
+	});
+
 	test("a request too long for one argument is staged in files, which the helper removes", async () => {
 		const box = localBox();
 		const root = join(dir, "staged");
