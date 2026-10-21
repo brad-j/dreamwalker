@@ -60,7 +60,7 @@ export default createApi(instance, {
 		credentials.see(read);
 		sandboxCredentials.see(read);
 	},
-	probe: async () => probe(await sandboxFor(sandboxCredentials, platformEnv, "dreamwalker-probe")),
+	probe: async (name) => probe(await sandboxFor(sandboxCredentials, platformEnv, name)),
 	credentials,
 	describe: () => ({
 		startedAt,
