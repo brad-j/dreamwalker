@@ -9,7 +9,7 @@
     "dreamwalker": "node --no-warnings --env-file-if-exists=.env src/main.ts",
     "dev": "EXPERIMENTAL_NETLIFY_SERVER=true netlify dev",
     "check": "tsc && pnpm lint && pnpm test",
-    "lint": "oxlint --deny-warnings src test netlify",
+    "lint": "oxlint --deny-warnings src test netlify scripts sandbox",
     "test": "node --no-warnings --test test/*.test.ts"
   },
   "packageManager": "pnpm@12.10.1",

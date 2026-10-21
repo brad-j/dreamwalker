@@ -13,6 +13,7 @@ import { context } from "./host.ts";
 import { Jobs, pauseJob, removeJob, resumeJob } from "./jobs.ts";
 import { Reminders, removeReminder } from "./reminders.ts";
 import { transcript } from "./transcript.ts";
+import type { SandboxCheck } from "./sandbox-check.ts";
 
 const AskBody = object({ message: string, requestId: optional(string) });
 const AllowBody = object({ amount: optional(number) });
@@ -20,9 +21,8 @@ const AddNoteBody = object({ text: string });
 const UpdateNoteBody = object({ id: noteId, text: string });
 const ForgetNoteBody = object({ id: noteId });
 const CancelReminderBody = object({ id: number });
-const DecideBody = object({ id: string, decision: literal("once", "always", "deny") });
+const DecideBody = object({ id: string, decision: literal("once", "deny") });
 const AnswerBody = object({ id: string, text: string });
-const HostBody = object({ host: string });
 const JobBody = object({ id: number });
 
 export type ApiOptions = {
@@ -37,6 +37,8 @@ export type ApiOptions = {
 	credentials: Credentials;
 	/** Makes or finds a sandbox and says what's in it, for `/api/sandbox/probe`; absent where there are no sandboxes. */
 	probe?: (name: string) => Promise<Record<string, string | number>>;
+	/** Runs Pi Durable's environment conformance on the agent's sandbox, for `/api/sandbox/check`; absent where there are no sandboxes. */
+	sandboxCheck?: SandboxCheck;
 	/** What the status route reports about the instance. */
 	describe: () => Record<string, string | number | boolean | undefined | VariableNames>;
 };
@@ -103,6 +105,12 @@ export function createApi(instance: Instance, options: ApiOptions) {
 				return Response.json({ error: message(error) }, { status: 502 });
 			}
 		}
+		if (url.pathname === "/api/sandbox/check") {
+			if (options.sandboxCheck === undefined) return Response.json({ error: "No sandboxes here" }, { status: 404 });
+			// POST starts a run, or finds the one going; GET shows the latest. A run takes minutes, so poll it.
+			if (request.method === "POST") return Response.json(options.sandboxCheck.start(), { status: 202 });
+			if (request.method === "GET") return Response.json(options.sandboxCheck.latest() ?? { error: "No check has run on this instance" }, { status: options.sandboxCheck.latest() === undefined ? 404 : 200 });
+		}
 		const host = await instance.host();
 		if (host === undefined) return replaced();
 		if (url.pathname === "/api/budget" && request.method === "GET") return Response.json(await host.budget.refresh());
@@ -115,8 +123,7 @@ export function createApi(instance: Instance, options: ApiOptions) {
 			return Response.json(await host.budget.allowMore(amount));
 		}
 		if (url.pathname === "/api/approvals" && request.method === "GET") {
-			const { fetchHosts } = await host.approvals.state();
-			return Response.json({ requests: await host.approvals.pending(), fetchHosts });
+			return Response.json({ requests: await host.approvals.pending() });
 		}
 		if (url.pathname === "/api/approvals/decide" && request.method === "POST") {
 			const body = await bodyOf(request, DecideBody);
@@ -129,12 +136,6 @@ export function createApi(instance: Instance, options: ApiOptions) {
 			if (body instanceof Response) return body;
 			const answered = await host.approvals.answer(body.id, body.text, by(request));
 			return answered === undefined ? Response.json({ error: "No such question waiting, or an empty answer" }, { status: 404 }) : Response.json(answered);
-		}
-		if (url.pathname === "/api/approvals/forget-host" && request.method === "POST") {
-			const body = await bodyOf(request, HostBody);
-			if (body instanceof Response) return body;
-			await host.approvals.disallowHost(body.host);
-			return Response.json({ ok: true });
 		}
 		if (url.pathname === "/api/transcript" && request.method === "GET") {
 			const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 300, 1), 1000);

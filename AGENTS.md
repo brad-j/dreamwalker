@@ -17,13 +17,14 @@ A personal agent for one person on Pi Durable, built for Netlify Server: the pla
 - [docs/plan.md](docs/plan.md) holds the decisions, how gaidin's assumptions map onto the platform, the numbered Done list and Next. Read it before starting. A finished feature gets the next Done item, and a changed decision is changed there.
 - `netlify/server/index.ts` is the Server's entry: it opens the host once per instance and exports the API's fetch handler. Everything else is in `src/`.
 - `src/storage/` is Pi Durable's storage on Netlify Database: the Postgres facade, the lease, and opening both. The schema is `netlify/database/migrations/`.
+- `src/sandbox-env.ts` is the agent's computer, an `ExecutionEnv` over a Netlify Sandbox; `sandbox/helper.mjs` runs inside it on Pi Durable's own environment. After changing the helper or upgrading Pi Durable, run `node --no-warnings scripts/sandbox-files.ts` to regenerate `src/sandbox-files.ts`.
 
 ## Rules
 
 - Nothing may live only in memory or on the instance's disk: an instance sleeps after five minutes without a request, is replaced after eight hours, and starts empty. Durable state goes through Pi Durable's storage or Netlify Blobs.
 - `getContext()` and anything built from it exist only while a request is being handled. Code that runs for reminders, jobs or resumed tasks can't use them.
 - Schema changes are new migration files in `netlify/database/migrations/`, never edits to an applied one and never DDL at runtime. That includes Pi Durable's tables when an upgrade raises its schema version.
-- The safety code is `src/approvals.ts`, `guards.ts`, `fetch.ts`, `search.ts` (whose URLs let fetches through), the guards beside each tool, `src/storage/lease.ts` and the token check in `src/api.ts`. A change that lets through anything these used to stop or ask about says so in its commit message and has a test. Never weaken or delete a test of them to make a change pass.
+- The safety code is `src/approvals.ts`, `guards.ts`, `fetch.ts`, `workspace.ts`, the guards beside each tool, `src/storage/lease.ts` and the token check in `src/api.ts`. A change that lets through anything these used to stop or ask about says so in its commit message and has a test. Never weaken or delete a test of them to make a change pass.
 - Satisfy the anti-slop lint rules (`tools/oxlint/anti-slop/`) by changing the code. Don't turn a rule off, add an override or add an ignore comment.
 - Pi Durable, pi-ai and chord are pinned and upgraded deliberately. Don't add or upgrade a package as part of a task; say that one is needed. pnpm resolves only versions at least 3 days old (`minimumReleaseAge: 4320`).
 - Nothing about the owner's own setup goes in code, tests or docs: no real names, site IDs, host names or home paths. Use `example.com` and `*.test` names, and call the person "the owner" in docs.

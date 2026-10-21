@@ -4,6 +4,7 @@
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { AssistantEntry, createRegistry, defineExtension, type EntryRecord, Harness, section, type Storage } from "@earendil-works/pi-durable";
+import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { approvalExtension, ApprovalService } from "./approvals.ts";
 import { type BudgetSettings, budgetSettingsFrom, createBudget } from "./budget.ts";
 import { createFetch, type FetchOptions } from "./fetch.ts";
@@ -14,6 +15,7 @@ import { type Chosen } from "./model.ts";
 import { type Adapters, createNotifications } from "./notifications.ts";
 import { createReminders } from "./reminders.ts";
 import { setTimeZone, stamp } from "./time.ts";
+import { createWorkspace } from "./workspace.ts";
 
 export const context = BACKGROUND_CONTEXT;
 
@@ -42,6 +44,8 @@ export type HostOptions = {
 	approvalTimeoutMs?: number;
 	/** How web_search searches; without one there's no web_search, as on the faux model. */
 	search?: SearchBackend;
+	/** The agent's computer, where read, write, edit and bash run, made at each use; without one there are none. */
+	workspace?: () => ExecutionEnv;
 };
 
 export async function openHost(storage: Storage, chosen: Chosen, options: HostOptions = {}) {
@@ -86,7 +90,9 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	let approvals: ApprovalService | undefined;
 	const search = options.search === undefined ? undefined : createSearch(options.search, owner);
 	if (search !== undefined) registry.install(search.extension);
-	const guards = [...web.guards, ...(search?.guards ?? []), ...memory.guards, ...reminders.guards, ...jobs.guards];
+	const workspace = options.workspace === undefined ? undefined : createWorkspace(owner);
+	for (const extension of workspace?.extensions ?? []) registry.install(extension);
+	const guards = [...web.guards, ...(search?.guards ?? []), ...(workspace?.guards ?? []), ...memory.guards, ...reminders.guards, ...jobs.guards];
 	registry.install(approvalExtension(() => approvals!, owner, () => guards));
 	registry.install(budget.extension);
 	const harness = await Harness.open(
@@ -94,6 +100,7 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 		{
 			models: budget.guard(chosen.models),
 			registry,
+			env: options.workspace,
 			// Partial answers and tool output are committed at most this often. Remote storage pays per commit.
 			settings: { progress: { partialIntervalMs: 500, outputIntervalMs: 500 } },
 			onReport: (error) => console.error("[report]", error),

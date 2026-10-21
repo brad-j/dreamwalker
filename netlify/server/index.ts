@@ -13,7 +13,9 @@ import { memoryStorage, startInstance } from "../../src/instance.ts";
 import { Credentials, modelFor, modelSettingsFrom } from "../../src/model.ts";
 import { ntfyAdapter, ntfySettingsFrom } from "../../src/ntfy.ts";
 import { claudeSearch } from "../../src/search.ts";
-import { probe, SandboxCredentials, sandboxFor } from "../../src/sandbox.ts";
+import { AGENT_SANDBOX, probe, SandboxCredentials, sandboxFor } from "../../src/sandbox.ts";
+import { sandboxCheck } from "../../src/sandbox-check.ts";
+import { boxOf, SandboxEnv } from "../../src/sandbox-env.ts";
 import { openDatabaseStorage } from "../../src/storage/index.ts";
 
 export const config: Config = { path: "/api/*" };
@@ -36,9 +38,13 @@ const chosen = modelFor(settings, credentials);
 // Search runs on Claude too, through the same credentials; there's none on the faux model.
 const search =
 	settings.provider === "faux" ? undefined : claudeSearch(() => credentials.current(platformEnv), settings.id, chosen.models.getModel("anthropic", settings.id)?.cost);
+// The agent's computer is a Netlify Sandbox, reached with the credentials the newest request showed.
+const agentSandbox = { id: `sandbox:${AGENT_SANDBOX}`, root: "/root/.dreamwalker", box: async () => boxOf(await sandboxFor(sandboxCredentials, platformEnv, AGENT_SANDBOX)) };
+const workspace = () => new SandboxEnv({ ...agentSandbox, cwd: "/root/work" });
 const instance = startInstance(storage, chosen, {
 	owner,
 	search,
+	workspace,
 	budget,
 	adapters: ntfy === undefined ? {} : { ntfy: ntfyAdapter(ntfy) },
 });
@@ -61,6 +67,7 @@ export default createApi(instance, {
 		sandboxCredentials.see(read);
 	},
 	probe: async (name) => probe(await sandboxFor(sandboxCredentials, platformEnv, name)),
+	sandboxCheck: sandboxCheck({ ...agentSandbox, scratch: "/root/.dreamwalker-check" }),
 	credentials,
 	describe: () => ({
 		startedAt,

@@ -34,8 +34,16 @@ export class SandboxCredentials {
 	}
 }
 
-/** What the agent's sandbox may reach: nothing, as gaidin's shell has no network. fetch_url is the way out, and it asks. */
-export const AGENT_NETWORK: NetworkPolicy = { egress: "deny_all" };
+/**
+ * What the agent's sandbox may reach: the open internet, as Claude Code's and Codex's shells do. A sandbox keeps the
+ * policy it was made with, so changing this means a new sandbox. What keeps it safe is what isn't there: none of the
+ * server's secrets (the owner's token, the Gateway's credentials, the database) are given to it, and what its commands
+ * print counts as outside text, so writing to memory or changing the schedule afterwards asks the owner.
+ */
+export const AGENT_NETWORK: NetworkPolicy = { egress: "allow_all" };
+
+/** The agent's sandbox. */
+export const AGENT_SANDBOX = "dreamwalker-agent";
 
 /** The sandbox called `name`, made with `network` the first time. */
 export async function sandboxFor(credentials: SandboxCredentials, read: ReadEnv, name: string, network: NetworkPolicy = AGENT_NETWORK): Promise<Sandbox> {
@@ -59,5 +67,7 @@ export async function probe(sandbox: Sandbox): Promise<Record<string, string | n
 		user: await run("id; pwd; echo $HOME"),
 		programs: await run("for p in sh bash dash busybox python3 node git stat find base64 head tail wc mktemp realpath inotifywait fd rg; do printf '%s=%s ' $p \"$(command -v $p || echo -)\"; done"),
 		network: await run("(command -v curl >/dev/null && curl -sS -m 5 -o /dev/null -w '%{http_code}' https://example.com) 2>&1 || echo no-curl"),
+		// Only the names: whether the platform puts anything in a command's environment that the agent shouldn't see.
+		environment: await run("env | cut -d= -f1 | sort | tr '\\n' ' '"),
 	};
 }

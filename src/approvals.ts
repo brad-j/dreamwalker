@@ -18,9 +18,8 @@ import { type ConversationId, defineDoc, defineEntry, defineExtension, defineToo
 import type { Ask, Guard, Situation } from "./guards.ts";
 import { conversationId, taskId } from "./ids.ts";
 import { ParseError } from "./parse.ts";
-import { searchedUrls } from "./search.ts";
 
-export type Decision = "once" | "always" | "deny";
+export type Decision = "once" | "deny";
 /** "superseded": the owner sent a new message in the conversation instead of answering. */
 export type ApprovalStatus = "pending" | "approved" | "denied" | "answered" | "expired" | "cancelled" | "superseded";
 
@@ -40,8 +39,6 @@ export type ApprovalRequest = {
 	choices?: string[];
 	/** The owner's answer to a question. */
 	answer?: string;
-	/** The wider grant the second button gives, when one is offered. `label` is the button, `done` the outcome. */
-	always?: { kind: "fetch-host"; value: string; label: string; done: string };
 	createdAt: number;
 	expiresAt: number;
 	status: ApprovalStatus;
@@ -51,13 +48,13 @@ export type ApprovalRequest = {
 	decision?: Decision;
 };
 
-type ApprovalState = { requests: Record<string, ApprovalRequest>; fetchHosts: string[] };
+type ApprovalState = { requests: Record<string, ApprovalRequest> };
 
 export const Approvals = defineDoc<ApprovalState>({
 	kind: "dreamwalker.approvals",
 	version: 1,
 	scope: "session",
-	initial: () => ({ requests: {}, fetchHosts: [] }),
+	initial: () => ({ requests: {} }),
 });
 
 /**
@@ -108,7 +105,7 @@ export class ApprovalService {
 	}
 
 	async state(): Promise<ApprovalState> {
-		return (await this.#harness.snapshot(Approvals, background)) ?? { requests: {}, fetchHosts: [] };
+		return (await this.#harness.snapshot(Approvals, background)) ?? { requests: {} };
 	}
 
 	/** Requests still waiting for the owner. Ones whose call was stopped, or whose time ran out while the server was down, are closed. */
@@ -163,7 +160,7 @@ export class ApprovalService {
 	}
 
 	/** Records a request under `id` unless it exists, and returns it as stored. */
-	async open(id: string, at: { conversationId: number; taskId: number }, tool: string, ask: Pick<ApprovalRequest, "summary" | "detail" | "always" | "kind" | "choices">): Promise<ApprovalRequest> {
+	async open(id: string, at: { conversationId: number; taskId: number }, tool: string, ask: Pick<ApprovalRequest, "summary" | "detail" | "kind" | "choices">): Promise<ApprovalRequest> {
 		const now = Date.now();
 		const { request, created } = await this.#commit((doc) => {
 			for (const [key, old] of Object.entries(doc.requests)) {
@@ -193,7 +190,6 @@ export class ApprovalService {
 			request.decidedAt = Date.now();
 			request.by = by;
 			request.decision = decision;
-			if (decision === "always" && request.always?.kind === "fetch-host" && !doc.fetchHosts.includes(request.always.value)) doc.fetchHosts.push(request.always.value);
 			return this.#record(tx, request);
 		});
 		if (decided !== undefined) this.#settled(decided);
@@ -239,13 +235,6 @@ export class ApprovalService {
 			return this.#record(tx, request);
 		});
 		if (closed !== undefined) this.#settled(closed);
-	}
-
-	/** Forgets a host allowed for good, so fetching it asks again. */
-	async disallowHost(host: string): Promise<void> {
-		await this.#commit((doc) => {
-			doc.fetchHosts = doc.fetchHosts.filter((h) => h !== host);
-		});
 	}
 
 	/** Background bookkeeping; it fails harmlessly once the Harness is closed. */
@@ -360,13 +349,10 @@ export function approvalExtension(service: () => ApprovalService, owner: string,
 					const approvals = service();
 					const impossible = await refusalOf(guard, call, api, context);
 					if (impossible !== undefined) return { block: impossible };
-					const { fetchHosts } = await approvals.state();
 					const ask = await askFor(guard, call, {
-						fetchHosts,
 						conversationId: api.conversationId,
 						callId: call.id,
 						outside: () => outsideTextIn(api, context, (tool) => all.some((g) => g.tool === tool && g.outside), call.id),
-						searched: async () => searchedUrls((await contextOf(api, context)) ?? []),
 						snapshot: (doc) => api.snapshot(doc, context),
 					});
 					if (ask === undefined) return undefined;

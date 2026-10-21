@@ -112,7 +112,7 @@ test("IPv6 forms that carry an IPv4 address are refused: IPv4-compatible (::/96)
 	assert.ok(!blocked.check("2606:4700:4700::1111", "ipv6"), "a public IPv6 address");
 });
 
-test("a redirect is followed on its host only; one to another host comes back unfollowed, so fetching it is asked about like any other", async (t) => {
+test("a redirect is followed on its host only; one to another host comes back unfollowed, so fetching it is checked like any other", async (t) => {
 	const { base, options } = await setup(t);
 	const port = new URL(base).port;
 	// other.test resolves to nothing, so connecting to it would fail.
@@ -193,25 +193,13 @@ test("htmlToText leaves an entity it doesn't know as it is, even one named like 
 	assert.equal(htmlToText("<p>&constructor; &toString; &bogus; &AMP;</p>", "https://example.com/"), "&constructor; &toString; &bogus; &");
 });
 
-test("a fetch asks unless its host is allowed for good, offers to allow the host, and what it returns is outside text", async () => {
+test("a fetch doesn't ask, whatever its host, and what it returns is outside text", async () => {
 	const [guard] = createFetch().guards;
-	const ask = (url: unknown, fetchHosts: string[] = [], searched: string[] = []) => {
-		const situation: Situation = { fetchHosts, conversationId: 1, callId: "c1", outside: async () => [], searched: async () => searched, snapshot: async () => undefined };
+	const ask = (url: unknown) => {
+		const situation: Situation = { conversationId: 1, callId: "c1", outside: async () => ["fetch_url"], snapshot: async () => undefined };
 		return guard!.ask({ url } as never, situation);
 	};
 	assert.equal(guard!.tool, "fetch_url");
 	assert.equal(guard!.outside, true);
-	assert.deepEqual(await ask("https://a.example/page"), {
-		summary: "fetch https://a.example/page",
-		always: { kind: "fetch-host", value: "a.example", label: "Always allow a.example", done: "Always allowed a.example" },
-	});
-	assert.equal(await ask("https://a.example/other", ["a.example"]), undefined);
-	// A URL web_search returned doesn't ask, written the same way or not; another path on its host, or a query added, does.
-	const searched = ["https://a.example/recipes/curry", "not a url"];
-	assert.equal(await ask("https://a.example/recipes/curry", [], searched), undefined);
-	assert.equal(await ask("https://A.example:443/recipes/curry", [], searched), undefined);
-	assert.equal((await ask("https://a.example/recipes/curry?q=notes", [], searched))?.summary, "fetch https://a.example/recipes/curry?q=notes");
-	assert.equal((await ask("https://a.example/recipes/other", [], searched))?.summary, "fetch https://a.example/recipes/other");
-	// The tool reports a bad URL itself.
-	assert.equal(await ask("not a url"), undefined);
+	for (const url of ["https://a.example/page", "https://b.example/?q=notes", "not a url"]) assert.equal(await ask(url), undefined, url);
 });
