@@ -1,6 +1,6 @@
 // The Netlify tools: read-only access to one Netlify team, for the agents granted "netlify" (agents.ts). They call
-// Netlify's API from the server with a personal access token (`NETLIFY_AGENT_PAT`, a secret on the site), which never
-// reaches the model: it sees only the fields each tool names.
+// Netlify's API from the server with a personal access token (`NETLIFY_AGENT_PAT`, or that name with a suffix such as
+// whose token it is, a secret on the site), which never reaches the model: it sees only the fields each tool names.
 //
 // A personal access token acts as its user on every team the user is in, so where it reaches is checked, not assumed:
 // before any call, the token's teams are listed, and unless they're exactly the one configured (`NETLIFY_AGENT_TEAM`),
@@ -15,9 +15,17 @@ import { isObject, type Json, object } from "./parse.ts";
 
 export type NetlifySettings = { token: string; team: string };
 
-/** The settings from the environment, or undefined when either is missing. */
+/**
+ * The settings from the environment, or undefined when either is missing. The token is `NETLIFY_AGENT_PAT` or that name
+ * with a suffix (`NETLIFY_AGENT_PAT_<WHOSE>`); with more than one set there's no telling which is meant, so none is used.
+ */
 export function netlifySettingsFrom(env: NodeJS.ProcessEnv): NetlifySettings | undefined {
-	const token = env.NETLIFY_AGENT_PAT?.trim();
+	const tokens = Object.entries(env).filter(([name, value]) => (name === "NETLIFY_AGENT_PAT" || name.startsWith("NETLIFY_AGENT_PAT_")) && value?.trim());
+	if (tokens.length > 1) {
+		console.error(`[netlify] more than one token is set (${tokens.map(([name]) => name).join(", ")}); the Netlify tools use none of them`);
+		return undefined;
+	}
+	const token = tokens[0]?.[1]?.trim();
 	const team = env.NETLIFY_AGENT_TEAM?.trim();
 	return token && team ? { token, team } : undefined;
 }
@@ -98,7 +106,7 @@ export function createNetlify(settings: NetlifySettings | undefined, options: Ne
 	let checked: { slug: string; until: number } | undefined;
 
 	async function get(path: string): Promise<Json> {
-		if (settings === undefined) throw new NetlifyError("Netlify isn't set up: NETLIFY_AGENT_PAT and NETLIFY_AGENT_TEAM aren't both set on the site.");
+		if (settings === undefined) throw new NetlifyError("Netlify isn't set up: a NETLIFY_AGENT_PAT token and NETLIFY_AGENT_TEAM aren't both set on the site, or more than one token is.");
 		const response = await fetcher(`${base}${path}`, { headers: { authorization: `Bearer ${settings.token}`, accept: "application/json" } });
 		if (!response.ok) throw new NetlifyError(`Netlify answered ${response.status} for ${path.split("?")[0]}`);
 		// SAFETY: Netlify's API answers JSON; what's read from it goes through `at` and `pick`, which check each field.

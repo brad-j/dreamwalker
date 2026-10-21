@@ -78,9 +78,12 @@ async function start(t: TestContext, steps: Steps, accounts = ours) {
 
 const ntl = { name: "agentNTL", job: "Looks after the owner's Netlify sites.", grants: ["netlify"], sharedNotes: false };
 
-test("the settings come from the environment, and are unset without both", () => {
+test("the settings come from the environment, the token's name with a suffix or without, and are unset without both or with two tokens", () => {
 	assert.deepEqual(netlifySettingsFrom({ NETLIFY_AGENT_PAT: " t ", NETLIFY_AGENT_TEAM: "x" }), { token: "t", team: "x" });
+	assert.deepEqual(netlifySettingsFrom({ NETLIFY_AGENT_PAT_OWNER: "t", NETLIFY_AGENT_TEAM: "x" }), { token: "t", team: "x" });
 	assert.equal(netlifySettingsFrom({ NETLIFY_AGENT_PAT: "t" }), undefined);
+	assert.equal(netlifySettingsFrom({ NETLIFY_AGENT_PAT: "t", NETLIFY_AGENT_PAT_OWNER: "u", NETLIFY_AGENT_TEAM: "x" }), undefined);
+	assert.equal(netlifySettingsFrom({ NETLIFY_AGENT_PATS: "t", NETLIFY_AGENT_TEAM: "x" }), undefined, "only the name or the name and an underscore");
 });
 
 test("a granted agent reads sites, deploys, variables' names and DNS, with the token sent and nothing secret coming back", async (t) => {
