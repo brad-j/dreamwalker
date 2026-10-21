@@ -11,13 +11,15 @@
 // last request left them.
 //
 // gaidin's gates, agents and hand-offs aren't here; without gates, a job repeats at most every 6 hours.
+import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { configure, type ConversationId, defineDoc, defineEntry, defineExtension, defineTask, defineTool, type Extension, type TaskId, type Tx } from "@earendil-works/pi-durable";
 import { assistantText } from "./answers.ts";
-import { clip, guard, ifOutsideText, quoted } from "./guards.ts";
+import { clip, guard, ifOutsideText, type Place, quoted } from "./guards.ts";
 import { conversationId as toConversationId } from "./ids.ts";
 import { number, object, optional, string } from "./parse.ts";
 import { formatTime, stamp, timeZone } from "./time.ts";
+import { AgentOf, agentOf, DEFAULT_AGENT } from "./roster.ts";
 
 export type Schedule =
 	| { kind: "once"; at: number }
@@ -29,6 +31,8 @@ export type Mode = "report" | "watch";
 
 export type Job = {
 	taskId: number;
+	/** The named agent whose job it is; absent for dreamwalker's. Each agent lists and cancels only its own. */
+	agent?: string;
 	title: string;
 	instruction: string;
 	schedule: Schedule;
@@ -294,6 +298,8 @@ export function createJobs(options: {
 		// Background: the conversation goes idle while it waits, and Stop doesn't cancel it.
 		const taskId = await tx.createTask(JobTask, { title: fields.title, firstAt: first }, { ownership: { kind: "conversation" }, conversationId, background: true });
 		const job: Job = { taskId, ...fields, createdAt: Date.now(), nextAt: first, runs: 0 };
+		const agent = (await tx.doc(AgentOf, conversationId)).agent;
+		if (agent !== DEFAULT_AGENT) job.agent = agent;
 		doc.items.push(job);
 		return { ...job };
 	}
@@ -452,13 +458,19 @@ export function createJobs(options: {
 		},
 	});
 
+	/** The jobs of the agent conversation `api` is in belongs to: each agent sees only its own. */
+	const ownJobs = async (api: Place, context: Context) => {
+		const agent = await agentOf(api, api.conversationId);
+		return ((await api.snapshot(Jobs, context))?.items ?? []).filter((j) => (j.agent ?? DEFAULT_AGENT) === agent);
+	};
+
 	const list = defineTool({
 		name: "list_jobs",
 		description: "List scheduled jobs with their ids, schedules and next runs.",
 		parameters: Type.Object({}),
 		replay: "safe",
 		execute: async (_args, api, context) => {
-			const items = (await api.snapshot(Jobs, context))?.items ?? [];
+			const items = await ownJobs(api, context);
 			return { output: [{ type: "text", text: items.length === 0 ? "No scheduled jobs." : items.map(describeJob).join("\n") }] };
 		},
 	});
@@ -469,7 +481,8 @@ export function createJobs(options: {
 		parameters: Type.Object({ id: Type.Number() }),
 		replay: "safe",
 		execute: async (args, api, context) => {
-			const removed = await api.commit((tx) => removeJob(tx, args.id), context);
+			const mine = (await ownJobs(api, context)).some((j) => j.taskId === args.id);
+			const removed = mine ? await api.commit((tx) => removeJob(tx, args.id), context) : undefined;
 			return { output: [{ type: "text", text: removed ? `Cancelled job ${args.id}: ${removed.title}` : `No job ${args.id}.` }] };
 		},
 	});

@@ -6,7 +6,7 @@ A personal agent for one person on Pi Durable, built for Netlify Server: the pla
 
 - `pnpm install`, then `pnpm check` before every commit: `tsc`, oxlint with the anti-slop rules, and every test.
 - One test file while working: `node --no-warnings --test test/api.test.ts`.
-- `pnpm dreamwalker ask "..."` (also `status`, `budget`, `allow`, `wake`, `memory`, `remember`, `forget`, `requests`, `approve`, `deny`, `answer`, `jobs`, `pause-job`, `resume-job`, `cancel-job`) talks to the server named by `DREAMWALKER_URL` with `DREAMWALKER_TOKEN`, both from `.env`.
+- `pnpm dreamwalker ask "..."` (`--agent ID` for another agent; also `agents`, `agent-add`, `archive-agent`, `restore-agent`, `status`, `budget`, `allow`, `wake`, `memory`, `remember`, `forget`, `requests`, `approve`, `deny`, `answer`, `jobs`, `pause-job`, `resume-job`, `cancel-job`) talks to the server named by `DREAMWALKER_URL` with `DREAMWALKER_TOKEN`, both from `.env`.
 - `DREAMWALKER_MODEL=faux pnpm dev` runs the server under `netlify dev` on a scripted model, with no key or network. It needs Node.js 24 and netlify-cli 27.10.0 or later.
 - Deploy by pushing to `main`; Netlify builds it. Not `netlify deploy`: from the CLI, new migrations are uploaded but not applied.
 - `netlify database migrations apply` (while `pnpm dev` runs) applies new migrations to the local database. Deploys apply them themselves.
@@ -18,6 +18,7 @@ A personal agent for one person on Pi Durable, built for Netlify Server: the pla
 - [docs/plan.md](docs/plan.md) holds the decisions, how gaidin's assumptions map onto the platform, the numbered Done list and Next. Read it before starting. A finished feature gets the next Done item, and a changed decision is changed there.
 - `netlify/server/index.ts` is the Server's entry: it opens the host once per instance and exports the API's fetch handler. Everything else is in `src/`.
 - `src/storage/` is Pi Durable's storage on Netlify Database: the Postgres facade, the lease, and opening both. The schema is `netlify/database/migrations/`.
+- `src/agents.ts` and `src/roster.ts` are the named agents: the roster, which agent each conversation belongs to (`AgentOf`, copied to the conversations one makes), and the identity prompt.
 - `src/worker.ts` is the split: the main agent holds the owner's data and has no way out; workers have the internet and none of the data.
 - `src/sandbox-env.ts` is the worker's computer, an `ExecutionEnv` over a Netlify Sandbox; `sandbox/helper.mjs` runs inside it on Pi Durable's own environment. After changing the helper or upgrading Pi Durable, run `node --no-warnings scripts/sandbox-files.ts` to regenerate `src/sandbox-files.ts`.
 

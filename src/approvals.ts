@@ -14,10 +14,11 @@ import { randomUUID } from "node:crypto";
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT as background } from "@earendil-works/chord/context";
 import { type ToolCall, Type } from "@earendil-works/pi-ai";
-import { type ContextView, type ConversationId, type Cursor, defineDoc, defineEntry, defineExtension, defineTool, type DocumentReader, type EntryRecord, type Harness, type HookApi, hook, type ToolExecutionApi, ToolTask, type Tx } from "@earendil-works/pi-durable";
-import type { Ask, Guard, Situation } from "./guards.ts";
+import { type ContextView, type ConversationId, type Cursor, defineDoc, defineEntry, defineExtension, defineTool, type EntryRecord, type Harness, type HookApi, hook, type ToolExecutionApi, ToolTask, type Tx } from "@earendil-works/pi-durable";
+import type { Ask, Guard, Place, Situation } from "./guards.ts";
 import { conversationId, taskId } from "./ids.ts";
 import { OUTSIDE_BEFORE, OwnerMarks, provenance } from "./outside.ts";
+import { agentOf, DEFAULT_AGENT } from "./roster.ts";
 import { ParseError } from "./parse.ts";
 
 export type Decision = "once" | "deny";
@@ -34,6 +35,8 @@ export type ApprovalRequest = {
 	summary: string;
 	/** More than a line can hold. */
 	detail?: string;
+	/** The named agent asking; absent for dreamwalker. */
+	agent?: string;
 	/** A question from ask_owner, rather than a request to allow a call. */
 	kind?: "question";
 	/** Answers offered as buttons. */
@@ -76,9 +79,9 @@ export async function askFor(guard: Guard, call: ToolCall, situation: Situation)
 }
 
 /** Why `call` can't succeed under its guard, or nothing. Arguments it can't read aren't refused here; they ask (askFor). */
-async function refusalOf(guard: Guard, call: ToolCall, read: DocumentReader, context: Context): Promise<string | undefined> {
+async function refusalOf(guard: Guard, call: ToolCall, place: Place, context: Context): Promise<string | undefined> {
 	try {
-		return await guard.refuse(call.arguments, read, context);
+		return await guard.refuse(call.arguments, place, context);
 	} catch (error) {
 		if (error instanceof ParseError) return undefined;
 		throw error;
@@ -212,6 +215,7 @@ export class ApprovalService {
 	/** Records a request under `id` unless it exists, and returns it as stored. */
 	async open(id: string, at: { conversationId: number; taskId: number }, tool: string, ask: Pick<ApprovalRequest, "summary" | "detail" | "kind" | "choices">): Promise<ApprovalRequest> {
 		const now = Date.now();
+		const agent = await agentOf(this.#harness, conversationId(at.conversationId));
 		const { request, created } = await this.#commit((doc) => {
 			for (const [key, old] of Object.entries(doc.requests)) {
 				if (old.status !== "pending" && (old.decidedAt ?? old.createdAt) < now - KEEP_DECIDED_MS) delete doc.requests[key];
@@ -219,6 +223,7 @@ export class ApprovalService {
 			const existing = doc.requests[id];
 			if (existing !== undefined) return { request: plain(existing), created: false };
 			const fresh: ApprovalRequest = { id, ...at, tool, ...ask, createdAt: now, expiresAt: now + this.#timeoutMs, status: "pending" };
+			if (agent !== DEFAULT_AGENT) fresh.agent = agent;
 			doc.requests[id] = fresh;
 			return { request: plain(fresh), created: true };
 		});

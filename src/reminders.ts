@@ -1,15 +1,17 @@
 // Reminders, from gaidin, for one agent and the owner's phone: gaidin's speakers and agents come with the modules they
 // belong to. Cancelling asks while outside text is in the conversation, so a page can't quietly undo what the owner set. A reminder is a background task that sleeps until its time, so it survives a
 // restart, and one that came due while the server was asleep fires as soon as it wakes.
+import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { type ConversationId, defineDoc, defineEntry, defineExtension, defineTask, defineTool, type TaskId, type Tx } from "@earendil-works/pi-durable";
-import { guard, ifOutsideText, quoted } from "./guards.ts";
+import { guard, ifOutsideText, type Place, quoted } from "./guards.ts";
 import { number, object, string } from "./parse.ts";
 import { formatClock, formatTime } from "./time.ts";
 import { outsideBefore } from "./outside.ts";
+import { AgentOf, agentOf, DEFAULT_AGENT } from "./roster.ts";
 
 /** `outside`: the outside sources in the conversation when it was set, whose text its own may carry. */
-export type Reminder = { taskId: number; text: string; at: number; outside?: string[] };
+export type Reminder = { taskId: number; text: string; at: number; outside?: string[]; agent?: string };
 export type Notify = (reminder: Reminder) => Promise<void>;
 
 /** Open reminders. A reminder leaves the list when it fires or is cancelled. */
@@ -99,9 +101,19 @@ export function createReminders(notify: Notify, owner = "the user") {
 	async function add(tx: Tx, conversationId: ConversationId, text: string, at: number, outside: readonly string[] = []): Promise<number> {
 		// Background: the conversation goes idle while it waits, and stopping a run doesn't cancel it.
 		const id = await tx.createTask(ReminderTask, { text, at }, { ownership: { kind: "conversation" }, conversationId, background: true });
-		(await tx.doc(Reminders)).items.push(outside.length === 0 ? { taskId: id, text, at } : { taskId: id, text, at, outside: [...outside] });
+		const agent = (await tx.doc(AgentOf, conversationId)).agent;
+		const reminder: Reminder = { taskId: id, text, at };
+		if (outside.length > 0) reminder.outside = [...outside];
+		if (agent !== DEFAULT_AGENT) reminder.agent = agent;
+		(await tx.doc(Reminders)).items.push(reminder);
 		return id;
 	}
+
+	/** The reminders of the agent conversation `id` belongs to: each agent sees only its own. */
+	const ownReminders = async (api: Place, context: Context) => {
+		const agent = await agentOf(api, api.conversationId);
+		return ((await api.snapshot(Reminders, context))?.items ?? []).filter((r) => (r.agent ?? DEFAULT_AGENT) === agent);
+	};
 
 	const remind = defineTool({
 		name: "remind",
@@ -130,7 +142,7 @@ export function createReminders(notify: Notify, owner = "the user") {
 		parameters: Type.Object({}),
 		replay: "safe",
 		execute: async (_args, api, context) => {
-			const items = (await api.snapshot(Reminders, context))?.items ?? [];
+			const items = await ownReminders(api, context);
 			const flagged = (r: Reminder) => (r.outside?.length ?? 0) > 0;
 			const line = (r: Reminder) => `${r.taskId}: ${formatTime(r.at)}: ${r.text}${flagged(r) ? " (set after reading outside text)" : ""}`;
 			const text = items.length === 0 ? "No open reminders." : [...items].sort((a, b) => a.at - b.at).map(line).join("\n");
@@ -145,7 +157,8 @@ export function createReminders(notify: Notify, owner = "the user") {
 		parameters: Type.Object({ id: Type.Number() }),
 		replay: "safe",
 		execute: async (args, api, context) => {
-			const removed = await api.commit((tx) => removeReminder(tx, args.id), context);
+			const mine = (await ownReminders(api, context)).some((r) => r.taskId === args.id);
+			const removed = mine ? await api.commit((tx) => removeReminder(tx, args.id), context) : undefined;
 			const text = removed ? `Cancelled ${args.id}: ${removed.text}` : `No open reminder ${args.id}.`;
 			return { output: [{ type: "text", text }] };
 		},

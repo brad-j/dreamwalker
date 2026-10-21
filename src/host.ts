@@ -3,8 +3,9 @@
 // told to the owner unprompted (reminders, budget warnings) goes through notifications.ts.
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { AssistantEntry, createRegistry, defineExtension, Harness, section, type Storage } from "@earendil-works/pi-durable";
+import { AssistantEntry, createRegistry, Harness, type Storage } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
+import { createAgents, identity } from "./agents.ts";
 import { assistantText } from "./answers.ts";
 import { approvalExtension, ApprovalService } from "./approvals.ts";
 import { type BudgetSettings, budgetSettingsFrom, createBudget } from "./budget.ts";
@@ -15,6 +16,7 @@ import { createMemory } from "./memory.ts";
 import { type Chosen } from "./model.ts";
 import { type Adapters, createNotifications } from "./notifications.ts";
 import { OwnerMarks, OwnerMessage } from "./outside.ts";
+import { DEFAULT_AGENT, inheritAgent } from "./roster.ts";
 import { createReminders } from "./reminders.ts";
 import { setTimeZone, stamp } from "./time.ts";
 import { createWorker } from "./worker.ts";
@@ -65,18 +67,7 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 		explain: (reason) => (reason === "no_model" ? budget.blocked() : undefined),
 		withhold: () => [memory.extension],
 	});
-	const preamble = defineExtension({
-		name: "dreamwalker",
-		sections: [
-			section(
-				"preamble",
-				() =>
-					`You are dreamwalker, ${owner}'s personal agent. Each of ${owner}'s messages starts with the local time in brackets, ` +
-					`which is the time to use for anything said about "now", "today" or "at 3".`,
-				{ tag: false },
-			),
-		],
-	});
+	const preamble = identity(owner);
 	// What a worker works with: the way out to the internet, which the main agent doesn't have (worker.ts).
 	const web = createFetch(options.fetch, owner);
 	const search = options.search === undefined ? undefined : createSearch(options.search, owner);
@@ -95,6 +86,8 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 		{
 			models: budget.guard(chosen.models),
 			registry,
+			// A job's run or a worker belongs to the agent whose conversation made it.
+			conversationCreated: inheritAgent,
 			// Only a worker's conversation has a directory, so only workers get a computer.
 			env: (target) => (target.cwd === undefined ? undefined : options.workspace?.env(target.cwd)),
 			// Partial answers and tool output are committed at most this often. Remote storage pays per commit.
@@ -115,6 +108,8 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 		marks.since = newest === undefined ? 0 : Number(newest.id);
 	}, context);
 	approvals = new ApprovalService(harness, { timeoutMs: options.approvalTimeoutMs });
+	const agents = createAgents(harness, () => chosen.model);
+	await agents.configureModels();
 	// After the root exists, before anything runs: a resumed run is checked against the limits too.
 	await budget.attach(harness);
 	harness.resume();
@@ -131,33 +126,36 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	 * find the same run. A message while a question waits is its answer; one while a call waits for approval closes that
 	 * request, so the run goes on and the message is answered after it.
 	 */
-	async function ask(message: string, requestId?: string, by = "cli") {
-		if ((await approvals!.intercept(root.id, message, by)) === "answered") return { ok: true as const, text: "", answered: true };
-		const submission = await root.submit(fromOwner(message, by, requestId), context);
+	async function ask(message: string, requestId?: string, by = "cli", agent = DEFAULT_AGENT) {
+		const home = await agents.home(agent);
+		if ((await approvals!.intercept(home.id, message, by)) === "answered") return { ok: true as const, text: "", answered: true };
+		const submission = await home.submit(fromOwner(message, by, requestId), context);
 		const settled = await submission.wait(context);
 		if (settled.status !== "done" || settled.type !== "input") return { ok: false as const, reason: settled.status === "unanswered" ? explain(settled.reason) : "not an input" };
-		const answer = await root.commit((tx) => tx.entry(AssistantEntry, settled.answer), context);
+		const answer = await home.commit((tx) => tx.entry(AssistantEntry, settled.answer), context);
 		return { ok: true as const, text: assistantText(answer) ?? "" };
 	}
 
 	/** Queues `message` without waiting for the answer, for callers that can't hold a request open that long. True when it answered a question instead. */
-	async function send(message: string, requestId?: string, by = "web"): Promise<boolean> {
-		if ((await approvals!.intercept(root.id, message, by)) === "answered") return true;
-		await root.submit(fromOwner(message, by, requestId), context);
+	async function send(message: string, requestId?: string, by = "web", agent = DEFAULT_AGENT): Promise<boolean> {
+		const home = await agents.home(agent);
+		if ((await approvals!.intercept(home.id, message, by)) === "answered") return true;
+		await home.submit(fromOwner(message, by, requestId), context);
 		return false;
 	}
 
 	/** Whether the root conversation is working on something: a run in progress or queued, not a reminder waiting. */
-	async function busy(): Promise<boolean> {
-		return root.commit(async (tx) => {
+	async function busy(agent = DEFAULT_AGENT): Promise<boolean> {
+		const home = await agents.home(agent);
+		return home.commit(async (tx) => {
 			for (const status of ["pending", "running", "waiting", "completing"] as const) {
-				if ((await tx.scanTasks({ conversationId: root.id, background: false, status }, 1)).items.length > 0) return true;
+				if ((await tx.scanTasks({ conversationId: home.id, background: false, status }, 1)).items.length > 0) return true;
 			}
 			return false;
 		}, context);
 	}
 
-	return { harness, root, ask, send, busy, budget, reminders, jobs, approvals, close: () => harness.close(context) };
+	return { harness, root, agents, ask, send, busy, budget, reminders, jobs, approvals, close: () => harness.close(context) };
 }
 
 export type Host = Awaited<ReturnType<typeof openHost>>;

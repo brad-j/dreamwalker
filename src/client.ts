@@ -32,6 +32,8 @@ const RequestAnswer = object({ id: string, tool: string, summary: string, kind: 
 const JobAnswer = object({ taskId: number, title: string, instruction: string, mode: string, nextAt: optional(number), lastAt: optional(number), lastResult: optional(string), failures: optional(number), paused: optional(object({ at: number, reason: string })) });
 const JobsAnswer = object({ jobs: array(JobAnswer) });
 const Requests = object({ requests: array(RequestAnswer) });
+const AgentAnswer = object({ id: string, name: string, job: string, archivedAt: optional(number) });
+const AgentsAnswer = object({ agents: array(AgentAnswer) });
 const BudgetAnswer = object({ today: number, month: number, dailyLimit: number, monthlyLimit: number, stopped: boolean, reason: optional(string) });
 
 export function createClient(settings: ClientSettings, request: typeof fetch = fetch) {
@@ -55,7 +57,12 @@ export function createClient(settings: ClientSettings, request: typeof fetch = f
 
 	return {
 		/** Sends a message and waits for the answer. The same `requestId` finds the same run instead of asking twice. */
-		ask: async (message: string, requestId: string = randomUUID()) => (await call("/api/ask", Answer, { method: "POST", body: { message, requestId } })).answer,
+		ask: async (message: string, requestId: string = randomUUID(), agent?: string) =>
+			(await call("/api/ask", Answer, { method: "POST", body: agent === undefined ? { message, requestId } : { message, requestId, agent } })).answer,
+		/** dreamwalker and the agents the owner added. */
+		agents: () => call("/api/agents", AgentsAnswer),
+		addAgent: (name: string, job: string) => call("/api/agents/add", AgentAnswer, { method: "POST", body: { name, job } }),
+		agent: (action: "archive" | "restore", id: string) => call(`/api/agents/${action}`, AgentAnswer, { method: "POST", body: { id } }),
 		/** The instance, the storage, the budget and the model's credentials, as the server reports them. */
 		status: () => call("/api/status", (value) => value),
 		budget: () => call("/api/budget", BudgetAnswer),
@@ -66,7 +73,7 @@ export function createClient(settings: ClientSettings, request: typeof fetch = f
 		memory: () => call("/api/memory", NotesAnswer),
 		remember: (text: string) => call("/api/memory/add", NoteAnswer, { method: "POST", body: { text } }),
 		forget: async (id: string) => (await call("/api/memory/forget", Ok, { method: "POST", body: { id } })).ok,
-		/** What's waiting for the owner, and the hosts allowed for good. */
+		/** What's waiting for the owner. */
 		requests: () => call("/api/approvals", Requests),
 		decide: (id: string, decision: "once" | "deny") => call("/api/approvals/decide", RequestAnswer, { method: "POST", body: { id, decision } }),
 		answer: (id: string, text: string) => call("/api/approvals/answer", RequestAnswer, { method: "POST", body: { id, text } }),

@@ -7,12 +7,15 @@
 //   })
 import type { Context } from "@earendil-works/chord";
 import type { ToolCall } from "@earendil-works/pi-ai";
-import type { DocumentReader, JsonObject, SessionDocToken } from "@earendil-works/pi-durable";
+import type { ConversationId, DocumentReader, JsonObject, SessionDocToken } from "@earendil-works/pi-durable";
 import type { ApprovalRequest } from "./approvals.ts";
 import { parse, type Parser } from "./parse.ts";
 
 /** What a call asks the owner. `detail` holds what the summary can't, so the owner sees all of what they allow. */
 export type Ask = Pick<ApprovalRequest, "summary" | "detail">;
+
+/** The documents as they stand, and the conversation the call is in. */
+export type Place = DocumentReader & { readonly conversationId: ConversationId };
 
 /** One of dreamwalker's session documents as it stands. */
 export type Snapshot = <T extends JsonObject>(doc: SessionDocToken<T>) => Promise<Readonly<T> | undefined>;
@@ -46,7 +49,7 @@ export type Guard = {
 	/** What the call asks, or nothing. Throws a ParseError when the arguments don't read right. */
 	readonly ask: (args: Args, situation: Situation) => Promise<Ask | undefined>;
 	/** Why the call can't succeed, read from the current state, or nothing. Checked before asking and again after an approval. Throws a ParseError when the arguments don't read right. */
-	readonly refuse: (args: Args, read: DocumentReader, context: Context) => Promise<string | undefined>;
+	readonly refuse: (args: Args, place: Place, context: Context) => Promise<string | undefined>;
 };
 
 /** A guard for `tool`, whose rules get the call's arguments as `parser` reads them. */
@@ -55,7 +58,7 @@ export function guard<A>(
 	parser: Parser<A>,
 	rules: {
 		ask?: (args: A, situation: Situation) => Awaitable<Ask | undefined>;
-		refuse?: (args: A, read: DocumentReader, context: Context) => Awaitable<string | undefined>;
+		refuse?: (args: A, place: Place, context: Context) => Awaitable<string | undefined>;
 		outside?: true;
 		tracksOutside?: true;
 	},

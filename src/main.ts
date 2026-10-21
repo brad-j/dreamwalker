@@ -6,8 +6,14 @@ import { clientSettingsFrom, createClient } from "./client.ts";
 
 const USAGE = `usage: dreamwalker COMMAND
 
-  ask [--id ID] "MESSAGE"   send a message and print the answer; the same --id finds the
-                            same run instead of asking twice
+  ask [--id ID] [--agent A] "MESSAGE"
+                            send a message and print the answer; the same --id finds the
+                            same run instead of asking twice; --agent talks to another agent
+  agents                    dreamwalker and the agents you added
+  agent-add NAME "JOB"      add an agent: a name and what it does, in a line
+  archive-agent ID, restore-agent ID
+                            archive an agent (its jobs pause, its reminders are cancelled)
+                            or bring it back
   status                    the instance, its storage, budget and model credentials
   budget                    today's and this month's spend against the limits
   allow [AMOUNT]            let today go AMOUNT dollars past the daily limit, or another
@@ -43,7 +49,7 @@ async function fullId(client: ReturnType<typeof createClient>, prefix: string): 
 }
 
 async function main(argv: string[]): Promise<number> {
-	const { values, positionals } = parseArgs({ args: argv, options: { id: { type: "string" }, help: { type: "boolean", short: "h" } }, allowPositionals: true });
+	const { values, positionals } = parseArgs({ args: argv, options: { id: { type: "string" }, agent: { type: "string" }, help: { type: "boolean", short: "h" } }, allowPositionals: true });
 	const [command, ...rest] = positionals;
 	if (values.help || command === undefined || command === "help") {
 		console.log(USAGE);
@@ -54,7 +60,24 @@ async function main(argv: string[]): Promise<number> {
 		case "ask": {
 			const message = rest.join(" ").trim();
 			if (message === "") throw new Error('ask needs a message: dreamwalker ask "..."');
-			console.log(await client.ask(message, values.id));
+			console.log(await client.ask(message, values.id, values.agent));
+			return 0;
+		}
+		case "agents":
+			for (const a of (await client.agents()).agents) console.log(`${a.id.padEnd(16)} ${a.name}: ${a.job}${a.archivedAt === undefined ? "" : "  (archived)"}`);
+			return 0;
+		case "agent-add": {
+			const [name, ...job] = rest;
+			if (name === undefined || job.length === 0) throw new Error('agent-add needs a name and a job: dreamwalker agent-add Sage "Answers garden questions"');
+			const added = await client.addAgent(name, job.join(" "));
+			console.log(`added ${added.id}: ${added.name}`);
+			return 0;
+		}
+		case "archive-agent":
+		case "restore-agent": {
+			if (rest[0] === undefined) throw new Error(`${command} needs an agent's id`);
+			const done = await client.agent(command === "archive-agent" ? "archive" : "restore", rest[0]);
+			console.log(`${done.name} ${done.archivedAt === undefined ? "restored" : "archived"}`);
 			return 0;
 		}
 		case "status":

@@ -8,14 +8,19 @@ import type { ReadEnv } from "./environment.ts";
 import type { Instance } from "./instance.ts";
 import type { Credentials } from "./model.ts";
 import { addNote, forgetNote, MAX_NOTE, MAX_TOTAL, Memory, noteId, noteProblem, updateNote } from "./memory.ts";
-import { literal, number, object, optional, parse, ParseError, type Parser, string } from "./parse.ts";
+import { boolean, literal, number, object, optional, parse, ParseError, type Parser, string } from "./parse.ts";
 import { context } from "./host.ts";
 import { Jobs, pauseJob, removeJob, resumeJob } from "./jobs.ts";
 import { Reminders, removeReminder } from "./reminders.ts";
 import { transcript } from "./transcript.ts";
 import type { SandboxCheck } from "./sandbox-check.ts";
+import { AgentUnavailable } from "./agents.ts";
+import { DEFAULT_AGENT } from "./roster.ts";
 
-const AskBody = object({ message: string, requestId: optional(string) });
+const AskBody = object({ message: string, requestId: optional(string), agent: optional(string) });
+const AddAgentBody = object({ name: string, job: string, instructions: optional(string), sharedNotes: optional(boolean) });
+const UpdateAgentBody = object({ id: string, name: optional(string), job: optional(string), instructions: optional(string), sharedNotes: optional(boolean) });
+const AgentBody = object({ id: string });
 const AllowBody = object({ amount: optional(number) });
 const AddNoteBody = object({ text: string });
 const UpdateNoteBody = object({ id: noteId, text: string });
@@ -73,6 +78,16 @@ async function bodyOf<T>(request: Request, parser: Parser<T>): Promise<T | Respo
 const by = (request: Request) => (request.headers.get("user-agent")?.startsWith("dreamwalker-cli") ? "cli" : "web");
 
 const message = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
+
+/** `respond`'s response, or 404 or 409 when it names an agent that's unknown or archived. */
+async function unavailable(respond: () => Promise<Response>): Promise<Response> {
+	try {
+		return await respond();
+	} catch (error) {
+		if (error instanceof AgentUnavailable) return Response.json({ error: error.message }, { status: error.status });
+		throw error;
+	}
+}
 
 export function createApi(instance: Instance, options: ApiOptions) {
 	const replaced = () => Response.json({ error: "This instance has been replaced by a newer one" }, { status: 503, headers: { "retry-after": "5" } });
@@ -161,9 +176,35 @@ export function createApi(instance: Instance, options: ApiOptions) {
 			const answered = await host.approvals.answer(body.id, body.text, by(request));
 			return answered === undefined ? Response.json({ error: "No such question waiting, or an empty answer" }, { status: 404 }) : Response.json(answered);
 		}
+		if (url.pathname === "/api/agents" && request.method === "GET") {
+			const named = await host.agents.list();
+			return Response.json({ agents: [{ id: DEFAULT_AGENT, name: DEFAULT_AGENT, job: "Your personal agent", sharedNotes: true, default: true }, ...named] });
+		}
+		const agentRoute = /^\/api\/agents\/(add|update|archive|restore)$/.exec(url.pathname)?.[1];
+		if (agentRoute !== undefined && request.method === "POST") {
+			try {
+				if (agentRoute === "add") {
+					const body = await bodyOf(request, AddAgentBody);
+					return body instanceof Response ? body : Response.json(await host.agents.add(body), { status: 201 });
+				}
+				if (agentRoute === "update") {
+					const body = await bodyOf(request, UpdateAgentBody);
+					if (body instanceof Response) return body;
+					const { id, ...changes } = body;
+					return Response.json(await host.agents.update(id, changes));
+				}
+				const body = await bodyOf(request, AgentBody);
+				if (body instanceof Response) return body;
+				return Response.json(agentRoute === "archive" ? await host.agents.archive(body.id) : await host.agents.restore(body.id));
+			} catch (error) {
+				if (error instanceof AgentUnavailable) return Response.json({ error: error.message }, { status: error.status });
+				return Response.json({ error: message(error) }, { status: 400 });
+			}
+		}
 		if (url.pathname === "/api/transcript" && request.method === "GET") {
 			const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 300, 1), 1000);
-			return Response.json({ lines: await transcript(host.root, limit), busy: await host.busy() });
+			const agent = url.searchParams.get("agent") ?? DEFAULT_AGENT;
+			return unavailable(async () => Response.json({ lines: await transcript(await host.agents.home(agent), limit), busy: await host.busy(agent) }));
 		}
 		if (url.pathname === "/api/reminders" && request.method === "GET") {
 			const items = (await host.harness.snapshot(Reminders, context))?.items ?? [];
@@ -216,14 +257,15 @@ export function createApi(instance: Instance, options: ApiOptions) {
 		if (url.pathname === "/api/send" && request.method === "POST") {
 			const body = await bodyOf(request, AskBody);
 			if (body instanceof Response) return body;
-			const answered = await host.send(body.message, body.requestId, "web");
-			return Response.json({ sent: true, answered }, { status: 202 });
+			return unavailable(async () => Response.json({ sent: true, answered: await host.send(body.message, body.requestId, "web", body.agent) }, { status: 202 }));
 		}
 		if (url.pathname === "/api/ask" && request.method === "POST") {
 			const body = await bodyOf(request, AskBody);
 			if (body instanceof Response) return body;
-			const answer = await host.ask(body.message, body.requestId);
-			return answer.ok ? Response.json({ answer: answer.text }) : Response.json({ error: `unanswered: ${answer.reason}` }, { status: 502 });
+			return unavailable(async () => {
+				const answer = await host.ask(body.message, body.requestId, by(request), body.agent);
+				return answer.ok ? Response.json({ answer: answer.text }) : Response.json({ error: `unanswered: ${answer.reason}` }, { status: 502 });
+			});
 		}
 		return new Response("Not found", { status: 404 });
 	};
