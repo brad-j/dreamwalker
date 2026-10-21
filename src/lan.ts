@@ -34,17 +34,19 @@ for u in "https://controlplane.tailscale.com/key?v=88" "http://controlplane.tail
 curl -sv -m 10 -o /dev/null https://controlplane.tailscale.com/ 2>&1 | grep -iE "issuer|subject:|SSL connection" | head -3
 echo "--- an upgrade, as Tailscale's control protocol makes"
 curl -sS -m 10 -o /dev/null -w '%{http_code}\n' -H "Connection: upgrade" -H "Upgrade: tailscale-control-protocol" -X POST "https://controlplane.tailscale.com/ts2021" 2>&1
+echo "--- interfaces and routes"
+ip -o addr 2>&1 | head -8; ip route 2>&1 | head -6; ip -6 route 2>&1 | head -4
 echo "--- tailscaled"
 mkdir -p /root/ts
 pkill tailscaled 2>/dev/null
-nohup ./tailscale/tailscaled --tun=userspace-networking --state=mem: --socket=/root/ts/sock --socks5-server=localhost:1055 --no-logs-no-support >/root/ts/log 2>&1 &
+nohup ./tailscale/tailscaled --tun=userspace-networking --state=mem: --socket=/root/ts/sock --socks5-server=localhost:1055 --no-logs-no-support --verbose=1 >/root/ts/log 2>&1 &
 sleep 4
 echo "--- up (no key: it should ask to log in)"
-timeout 25 ./tailscale/tailscale --socket=/root/ts/sock up --timeout=20s --hostname=dreamwalker-probe 2>&1 | head -6
+timeout 45 ./tailscale/tailscale --socket=/root/ts/sock up --timeout=40s --hostname=dreamwalker-probe 2>&1 | head -6
 echo "--- netcheck"
 timeout 25 ./tailscale/tailscale --socket=/root/ts/sock netcheck 2>&1 | head -24
 echo "--- log"
-tail -20 /root/ts/log
+grep -iE "link|netmon|interface|pause|route|error|fail|dial|noise|controlplane" /root/ts/log | tail -40
 pkill tailscaled 2>/dev/null
 echo "--- done"
 `;
