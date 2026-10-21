@@ -19,7 +19,7 @@ import { clip, guard, ifOutsideText, type Place, quoted } from "./guards.ts";
 import { conversationId as toConversationId } from "./ids.ts";
 import { number, object, optional, string } from "./parse.ts";
 import { formatTime, stamp, timeZone } from "./time.ts";
-import { AgentOf, agentOf, DEFAULT_AGENT } from "./roster.ts";
+import { AgentOf, agentOf, Chain, DEFAULT_AGENT } from "./roster.ts";
 
 export type Schedule =
 	| { kind: "once"; at: number }
@@ -33,6 +33,8 @@ export type Job = {
 	taskId: number;
 	/** The named agent whose job it is; absent for dreamwalker's. Each agent lists and cancels only its own. */
 	agent?: string;
+	/** For a hand-off, the agents whose messages and hand-offs led to it (roster.ts's Chain), which its runs carry on. */
+	chain?: string[];
 	title: string;
 	instruction: string;
 	schedule: Schedule;
@@ -292,7 +294,7 @@ export function createJobs(options: {
 	];
 
 	/** Adds a job whose reports go to `conversationId`. Throws when there are already MAX_JOBS. */
-	async function addJob(tx: Tx, conversationId: ConversationId, fields: Pick<Job, "title" | "instruction" | "schedule" | "mode">): Promise<Job> {
+	async function addJob(tx: Tx, conversationId: ConversationId, fields: Pick<Job, "title" | "instruction" | "schedule" | "mode" | "chain">): Promise<Job> {
 		const doc = await tx.doc(Jobs);
 		if (doc.items.length >= MAX_JOBS) throw new Error(`There are already ${MAX_JOBS} jobs; cancel one first.`);
 		const first = nextRun(fields.schedule, Date.now())!;
@@ -343,6 +345,7 @@ export function createJobs(options: {
 						const created = await tx.createConversation({ ownership: { kind: "task", taskId: runtime.taskId } });
 						const change = (await options.runExtensions?.(tx, job.agent ?? DEFAULT_AGENT)) ?? { add: [], remove: [] };
 						await configure(tx, created.id, { extensions: { add: [...change.add], remove: [extension, ...change.remove] } });
+						if (job.chain !== undefined) (await tx.doc(Chain, created.id)).agents = [...job.chain];
 						return { status: "running", checkpoint: { ...task.state.checkpoint, conversationId: created.id } };
 					}, context);
 					return;

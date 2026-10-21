@@ -19,6 +19,8 @@ export type AgentRecord = {
 	sharedNotes: boolean;
 	/** Tools beyond the main agent's it's been given, by grant name: "netlify". */
 	grants?: string[];
+	/** The agents it may message and hand work to, by id; dreamwalker may reach every agent. */
+	contacts?: string[];
 	conversationId: number;
 	createdAt: number;
 	archivedAt?: number;
@@ -35,6 +37,21 @@ export const AgentOf = defineDoc<{ agent: string; worker?: boolean }>({
 	fork: "current",
 	initial: () => ({ agent: DEFAULT_AGENT }),
 });
+
+/**
+ * The agents whose messages and hand-offs led to a conversation, the first sender first; empty for one the owner
+ * started. A chain stops at `MAX_CHAIN` hops, and an agent in it can't be asked again within it (messaging.ts).
+ */
+export const Chain = defineDoc<{ agents: string[] }>({
+	kind: "dreamwalker.chain",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "current",
+	initial: () => ({ agents: [] }),
+});
+
+export const MAX_CHAIN = 3;
 
 /** The agent of conversation `id`. */
 export async function agentOf(read: DocumentReader, id: ConversationId): Promise<string> {

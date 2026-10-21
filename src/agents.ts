@@ -30,7 +30,7 @@ export class AgentUnavailable extends Error {
 }
 
 /** What the owner gives a new agent. */
-export type AgentFields = { name: string; job: string; instructions?: string; sharedNotes?: boolean; grants?: string[] };
+export type AgentFields = { name: string; job: string; instructions?: string; sharedNotes?: boolean; grants?: string[]; contacts?: string[] };
 
 /** An agent's id from its name: lowercase letters, digits and single hyphens. */
 export const idFrom = (name: string) =>
@@ -83,6 +83,13 @@ export function createAgents(harness: Harness, model: () => ModelRef, grants: { 
 	const roster = async () => (await harness.snapshot(Agents, background))?.items ?? [];
 	const root = () => harness.root(background);
 
+	/** Why `contacts` can't be an agent's, or nothing: each is dreamwalker or an agent in the roster. */
+	async function contactsProblem(contacts: readonly string[] | undefined): Promise<string | undefined> {
+		const ids = [DEFAULT_AGENT, ...(await roster()).map((a) => a.id)];
+		const unknown = (contacts ?? []).filter((c) => !ids.includes(c));
+		return unknown.length === 0 ? undefined : `No such agent: ${unknown.join(", ")}.`;
+	}
+
 	async function get(id: string): Promise<AgentRecord> {
 		const found = (await roster()).find((a) => a.id === id);
 		if (found === undefined) throw new AgentUnavailable(`No agent ${id}`, 404);
@@ -105,7 +112,7 @@ export function createAgents(harness: Harness, model: () => ModelRef, grants: { 
 
 		/** Adds an agent with a home conversation of its own, on the site's model. */
 		async add(fields: AgentFields): Promise<AgentRecord> {
-			const problem = agentProblem(fields, known);
+			const problem = agentProblem(fields, known) ?? (await contactsProblem(fields.contacts));
 			if (problem !== undefined) throw new Error(problem);
 			const id = idFrom(fields.name);
 			if (id === DEFAULT_AGENT || (await roster()).some((a) => a.id === id)) throw new Error(`There's already an agent called ${id}`);
@@ -115,6 +122,7 @@ export function createAgents(harness: Harness, model: () => ModelRef, grants: { 
 				const record: AgentRecord = { id, name: fields.name.trim(), job: fields.job.trim(), sharedNotes: fields.sharedNotes ?? true, conversationId: home.id, createdAt: Date.now() };
 				if (fields.instructions !== undefined && fields.instructions.trim() !== "") record.instructions = fields.instructions.trim();
 				if (fields.grants !== undefined && fields.grants.length > 0) record.grants = [...new Set(fields.grants)];
+				if (fields.contacts !== undefined && fields.contacts.length > 0) record.contacts = [...new Set(fields.contacts)];
 				(await tx.doc(Agents)).items.push(record);
 				return { ...record };
 			}, background);
@@ -122,7 +130,7 @@ export function createAgents(harness: Harness, model: () => ModelRef, grants: { 
 
 		/** Changes an agent's name, job, instructions or whether it sees the shared notes. Its id stays. */
 		async update(id: string, changes: Partial<AgentFields>): Promise<AgentRecord> {
-			const problem = agentProblem(changes, known);
+			const problem = agentProblem(changes, known) ?? (await contactsProblem(changes.contacts));
 			if (problem !== undefined) throw new Error(problem);
 			await get(id);
 			const updated = await (await root()).commit(async (tx) => {
@@ -137,6 +145,10 @@ export function createAgents(harness: Harness, model: () => ModelRef, grants: { 
 				if (changes.grants !== undefined) {
 					if (changes.grants.length === 0) delete record.grants;
 					else record.grants = [...new Set(changes.grants)];
+				}
+				if (changes.contacts !== undefined) {
+					if (changes.contacts.length === 0) delete record.contacts;
+					else record.contacts = [...new Set(changes.contacts.filter((c) => c !== id))];
 				}
 				return { ...record };
 			}, background);

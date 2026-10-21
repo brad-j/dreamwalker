@@ -18,8 +18,8 @@ import { AgentUnavailable } from "./agents.ts";
 import { DEFAULT_AGENT } from "./roster.ts";
 
 const AskBody = object({ message: string, requestId: optional(string), agent: optional(string) });
-const AddAgentBody = object({ name: string, job: string, instructions: optional(string), sharedNotes: optional(boolean), grants: optional(array(string)) });
-const UpdateAgentBody = object({ id: string, name: optional(string), job: optional(string), instructions: optional(string), sharedNotes: optional(boolean), grants: optional(array(string)) });
+const AddAgentBody = object({ name: string, job: string, instructions: optional(string), sharedNotes: optional(boolean), grants: optional(array(string)), contacts: optional(array(string)) });
+const UpdateAgentBody = object({ id: string, name: optional(string), job: optional(string), instructions: optional(string), sharedNotes: optional(boolean), grants: optional(array(string)), contacts: optional(array(string)) });
 const AgentBody = object({ id: string });
 const AllowBody = object({ amount: optional(number) });
 const AddNoteBody = object({ text: string });

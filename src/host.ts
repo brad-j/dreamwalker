@@ -12,6 +12,7 @@ import { type BudgetSettings, budgetSettingsFrom, createBudget } from "./budget.
 import { createFetch, type FetchOptions } from "./fetch.ts";
 import { createHistory, type HistoryStore } from "./history.ts";
 import { createJobs } from "./jobs.ts";
+import { createMessaging } from "./messaging.ts";
 import { createSearch, type SearchBackend } from "./search.ts";
 import { createMemory } from "./memory.ts";
 import { type Chosen } from "./model.ts";
@@ -89,11 +90,17 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	const redacting = redaction(options.secrets ?? (() => []));
 	const workerTools = [web.extension, ...(search === undefined ? [] : [search.extension]), ...(workspace?.extensions ?? []), redacting];
 	const worker = createWorker({ owner, model: chosen.model, tools: [...workerTools, budget.extension], clear: options.workspace?.clear });
-	const guards = [...web.guards, ...(search?.guards ?? []), ...(workspace?.guards ?? []), ...worker.guards, ...netlify.guards, ...history.guards, ...memory.guards, ...reminders.guards, ...jobs.guards];
+	const messaging = createMessaging({
+		owner,
+		model: () => chosen.model,
+		jobs,
+		granted: async (tx, agent) => granted((await tx.doc(Agents)).items.find((a) => a.id === agent)?.grants),
+	});
+	const guards = [...messaging.guards, ...web.guards, ...(search?.guards ?? []), ...(workspace?.guards ?? []), ...worker.guards, ...netlify.guards, ...history.guards, ...memory.guards, ...reminders.guards, ...jobs.guards];
 	// The service needs the Harness, which needs the registry; the hook reads it once something calls.
 	let approvals: ApprovalService | undefined;
 	// The main agent's tools, which every conversation has unless it says otherwise: the root, and the runs of jobs.
-	const main = [preamble, memory.extension, history.extension, reminders.extension, jobs.extension, worker.extension, approvalExtension(() => approvals!, owner, () => guards), budget.extension, redacting];
+	const main = [preamble, memory.extension, history.extension, reminders.extension, jobs.extension, worker.extension, messaging.extension, approvalExtension(() => approvals!, owner, () => guards), budget.extension, redacting];
 	const registry = createRegistry();
 	for (const extension of new Set([...main, worker.instructions, ...workerTools, netlify.extension])) registry.install(extension);
 	const harness = await Harness.open(
