@@ -1,16 +1,19 @@
 // The HTTP API, as a fetch handler: the shape Netlify Server calls, and that tests call directly.
 //
-// Every route but /api/health and /api/wake needs the owner's token, `Authorization: Bearer <DREAMWALKER_TOKEN>`.
-// Without a token set, they're refused, except under `netlify dev`.
+// Every route but /api/health, /api/wake and the webhooks needs the owner's token, `Authorization: Bearer
+// <DREAMWALKER_TOKEN>`. Without a token set, they're refused, except under `netlify dev`. A webhook, at
+// /api/hooks/netlify/<agent>, needs Netlify's signature with `DREAMWALKER_HOOK_SECRET` instead (hooks.ts), and is refused
+// while that isn't set, under `netlify dev` too.
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { ReadEnv } from "./environment.ts";
 import type { Instance } from "./instance.ts";
 import type { Credentials } from "./model.ts";
 import { addNote, forgetNote, MAX_NOTE, MAX_TOTAL, Memory, noteId, noteProblem, updateNote } from "./memory.ts";
-import { array, boolean, literal, number, object, optional, parse, ParseError, type Parser, string } from "./parse.ts";
+import { array, boolean, json, literal, number, object, optional, parse, ParseError, parseJson, type Parser, string } from "./parse.ts";
 import { context } from "./host.ts";
 import { Jobs, pauseJob, removeJob, resumeJob } from "./jobs.ts";
+import { eventName, MAX_BODY, signatureProblem } from "./hooks.ts";
 import { Reminders, removeReminder } from "./reminders.ts";
 import { transcript } from "./transcript.ts";
 import type { SandboxCheck } from "./sandbox-check.ts";
@@ -38,6 +41,8 @@ export type ApiOptions = {
 	token: string | undefined;
 	/** Under `netlify dev`, where no token is needed. */
 	local: boolean;
+	/** The secret webhooks are signed with; undefined refuses every webhook. */
+	hookSecret?: string;
 	/** The environment as the request being handled sees it. */
 	env: ReadEnv;
 	/** Looks at the environment on every request, keeping what only a request shows: the model's credentials, the database's address. */
@@ -91,6 +96,34 @@ async function unavailable(respond: () => Promise<Response>): Promise<Response> 
 
 export function createApi(instance: Instance, options: ApiOptions) {
 	const replaced = () => Response.json({ error: "This instance has been replaced by a newer one" }, { status: 503, headers: { "retry-after": "5" } });
+
+	/** A Netlify webhook for `agent`: checked against its signature, then a job of the agent's, run now. */
+	async function netlifyHook(request: Request, agent: string): Promise<Response> {
+		if (options.hookSecret === undefined) return Response.json({ error: "Webhooks aren't set up here" }, { status: 503 });
+		if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY) return Response.json({ error: "Too large" }, { status: 413 });
+		const body = await request.text();
+		if (body.length > MAX_BODY) return Response.json({ error: "Too large" }, { status: 413 });
+		const problem = signatureProblem(request.headers.get("x-webhook-signature"), body, options.hookSecret);
+		if (problem !== undefined) return Response.json({ error: `Refused: ${problem}` }, { status: 401 });
+		let payload;
+		try {
+			payload = parseJson(body, json, "the webhook's body");
+		} catch (error) {
+			if (error instanceof ParseError) return Response.json({ error: error.message }, { status: 400 });
+			throw error;
+		}
+		const host = await instance.host();
+		if (host === undefined) return replaced();
+		try {
+			const received = await host.hooks.netlify(agent, eventName(request.headers.get("x-netlify-event")), body, payload);
+			return Response.json(received, { status: received.status === "queued" ? 202 : 200 });
+		} catch (error) {
+			if (error instanceof AgentUnavailable) return Response.json({ error: error.message }, { status: error.status });
+			// No room for another job, or the storage failed: Netlify sends it again later.
+			console.error("[hooks]", error);
+			return Response.json({ error: message(error) }, { status: 503, headers: { "retry-after": "60" } });
+		}
+	}
 	return async (request: Request): Promise<Response> => {
 		options.see(options.env);
 		const url = new URL(request.url);
@@ -110,6 +143,8 @@ export function createApi(instance: Instance, options: ApiOptions) {
 				return Response.json({ awake: false }, { status: 503 });
 			}
 		}
+		const hookAgent = /^\/api\/hooks\/netlify\/([a-z0-9-]{1,60})$/.exec(url.pathname)?.[1];
+		if (hookAgent !== undefined && request.method === "POST") return netlifyHook(request, hookAgent);
 		if (!allowed(request, options)) return Response.json({ error: "Unauthorized" }, { status: 401, headers: { "www-authenticate": "Bearer" } });
 		if (url.pathname === "/api/status") {
 			const storage = await instance.host().then(

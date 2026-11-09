@@ -11,6 +11,7 @@ import { approvalExtension, ApprovalService } from "./approvals.ts";
 import { type BudgetSettings, budgetSettingsFrom, createBudget } from "./budget.ts";
 import { createFetch, type FetchOptions } from "./fetch.ts";
 import { createHistory, type HistoryStore } from "./history.ts";
+import { createHooks } from "./hooks.ts";
 import { createJobs } from "./jobs.ts";
 import { createMessaging } from "./messaging.ts";
 import { createSearch, type SearchBackend } from "./search.ts";
@@ -132,6 +133,8 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 	approvals = new ApprovalService(harness, { timeoutMs: options.approvalTimeoutMs });
 	const agents = createAgents(harness, () => chosen.model, grants);
 	await agents.configureHomes();
+	// Verified webhooks wake the agent their URL names, as a job of its run now (hooks.ts).
+	const hooks = createHooks({ owner, jobs, home: (agent) => agents.home(agent) });
 	// The index follows commits from here; catching each home up runs in the background, so a long first one after a
 	// deploy doesn't hold up the request that opened the host.
 	const historyCaughtUp = history.attach(harness);
@@ -181,7 +184,7 @@ export async function openHost(storage: Storage, chosen: Chosen, options: HostOp
 		}, context);
 	}
 
-	return { harness, root, agents, netlify, historyCaughtUp, ask, send, busy, budget, reminders, jobs, approvals, close: () => harness.close(context) };
+	return { harness, root, agents, netlify, hooks, historyCaughtUp, ask, send, busy, budget, reminders, jobs, approvals, close: () => harness.close(context) };
 }
 
 export type Host = Awaited<ReturnType<typeof openHost>>;

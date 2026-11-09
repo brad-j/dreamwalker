@@ -65,13 +65,14 @@ const workspace = {
 	env: (dir: string) => new SandboxEnv({ ...workerSandbox, cwd: `${WORKER_LAYOUT.work}/${dir}`, ownHome: true }),
 	clear: async (dir: string) => clearTask(await workerSandbox.box(), WORKER_LAYOUT, dir),
 };
-// The server's secrets as they stand, redacted from every tool result: the owner's token, ntfy's, the Netlify tools'
+// The server's secrets as they stand, redacted from every tool result: the owner's token, the webhooks' secret, ntfy's, the Netlify tools'
 // token, and what only requests show (the Gateway's key, the database's address and password, the sandboxes' token).
 const secrets = () => {
 	const named = (name: string, value: string | undefined) => (value === undefined || value === "" ? [] : [{ name, value }]);
 	const db = databaseUrl.current(platformEnv);
 	return [
 		...named("DREAMWALKER_TOKEN", process.env.DREAMWALKER_TOKEN),
+		...named("DREAMWALKER_HOOK_SECRET", process.env.DREAMWALKER_HOOK_SECRET),
 		...named("NTFY_TOKEN", process.env.NTFY_TOKEN),
 		...named("NTFY_URL", process.env.NTFY_URL),
 		...Object.entries(process.env).flatMap(([name, value]) => (name.startsWith("NETLIFY_AGENT_PAT") ? named(name, value) : [])),
@@ -110,6 +111,7 @@ const startedAt = new Date().toISOString();
 export default createApi(instance, {
 	token: process.env.DREAMWALKER_TOKEN || undefined,
 	local: process.env.NETLIFY_DEV === "true",
+	hookSecret: process.env.DREAMWALKER_HOOK_SECRET || undefined,
 	env: platformEnv,
 	see: (read) => {
 		deployId ??= requestDeploy()?.id;

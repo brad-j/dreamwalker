@@ -53,7 +53,7 @@ const at = (value: Json | undefined, ...path: string[]): Json | undefined => {
 };
 
 /** The named fields of `value`, each read by its path, leaving out those that aren't there. */
-function pick(value: Json | undefined, fields: { readonly [name: string]: readonly string[] }) {
+export function pick(value: Json | undefined, fields: { readonly [name: string]: readonly string[] }) {
 	return Object.fromEntries(
 		Object.entries(fields).flatMap(([name, path]) => {
 			const found = at(value, ...path);
